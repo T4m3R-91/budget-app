@@ -3,5 +3,5 @@
 // The key is the "publishable" (or "anon public") key. It is safe to publish:
 // the database's access rules decide who can see anything.
 // NEVER put the "service_role" / "secret" key here.
-export const SUPABASE_URL = "";
-export const SUPABASE_KEY = "";
+  export const SUPABASE_URL = "https://qfympkexxuardskxbxtg.supabase.co";
+  export const SUPABASE_KEY = "sb_publishable_TaUlFi-tuAZD0-IWbB36zg_wSHroz3r";
