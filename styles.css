@@ -16,23 +16,33 @@
   --critical: #f85149;
   --radius: 12px;
   --tabbar-h: 60px;
+  --action-h: 68px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 * { box-sizing: border-box; }
+
+/* App shell: the page itself never scrolls or bounces; only <main> scrolls, so the tab bar
+   and the Save bar stay put (on iPhone the whole page used to rubber-band with them). */
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.4;
-  padding: calc(var(--safe-top) + 12px) 16px calc(var(--tabbar-h) + var(--safe-bottom) + 20px);
   -webkit-tap-highlight-color: transparent;
 }
+main {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding: calc(var(--safe-top) + 12px) 16px calc(var(--safe-bottom) + 24px);
+}
+body.in-app main { bottom: calc(var(--tabbar-h) + var(--safe-bottom)); padding-bottom: 24px; }
+body.has-action-bar main { padding-bottom: calc(var(--action-h) + 16px); }
 [hidden] { display: none !important; }
 button, input, select, textarea { font: inherit; color: inherit; }
 input, select, textarea { font-size: 16px; } /* 16px+ stops iOS from zooming on focus */
@@ -95,60 +105,118 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 .entry-head > :last-child { justify-self: end; }
 .entry-head.centered { grid-template-columns: 1fr; }
 .entry-head.centered > * { justify-self: center; }
+.entry-head.centered > .type-seg { justify-self: stretch; display: flex; }
+.type-seg button { flex: 1; padding: 10px 16px; }
 
-.amount-wrap { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin: 22px 0 4px; }
-.amount-cur { color: var(--muted); font-size: 22px; font-weight: 600; }
+/* Amount (left) or Scan (right). */
+/* Currency row comes first: the currency and rate chosen here apply to the amount and to Scan below. */
+.cur-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 10px; }
+.cur-row .seg { flex: 0 0 auto; }
+.rate-box {
+  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 4px 6px;
+  flex-wrap: wrap; min-height: 34px; text-align: right; border-radius: 10px; padding: 0 4px;
+}
+.rate-line { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rate-line.warn { color: var(--warn); }
+.rate-box .link-btn { font-size: 13px; padding: 4px 2px; }
+.rate-input { width: 84px; text-align: center; padding: 6px 8px; }
+
+/* Amount and Scan are equal-width alternatives, as tall as the category tiles. */
+.amount-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; }
+.amount-row.solo { grid-template-columns: 1fr; }
+.amount-box {
+  display: flex; flex-direction: column; justify-content: center; height: 60px; padding: 0 12px; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: text;
+}
+.amount-box:focus-within { border-color: var(--accent); }
+.income-mode .amount-box:focus-within { border-color: var(--income); }
+.amount-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.amount-cur { color: var(--muted); font-size: 13px; font-weight: 600; }
 .amount-input {
-  background: transparent; border: 0; color: var(--text); font-size: 46px; font-weight: 700;
-  width: 1.3ch; min-width: 1.3ch; max-width: 100%; text-align: center; font-variant-numeric: tabular-nums;
-  outline: none; caret-color: var(--accent); padding: 0;
+  flex: 1; min-width: 0; background: transparent; border: 0; padding: 0; outline: none;
+  color: var(--text); font-size: 24px; line-height: 1.2; font-weight: 700; text-align: right;
+  font-variant-numeric: tabular-nums; caret-color: var(--accent);
 }
 .amount-input::placeholder { color: var(--faint); }
-.converted { text-align: center; color: var(--muted); font-size: 13px; min-height: 19px; font-variant-numeric: tabular-nums; }
+.converted { text-align: right; color: var(--muted); font-size: 12px; line-height: 1.2; min-height: 14px; font-variant-numeric: tabular-nums; }
+.or { color: var(--muted); font-size: 13px; }
+.scan-btn { width: 100%; height: 60px; padding: 0 12px; white-space: nowrap; }
 
-.rate-row { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 12px 0 18px; }
-.rate-box { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; min-height: 32px; text-align: center; }
-.rate-line { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.rate-line.warn { color: var(--warn); }
-.rate-input { width: 100px; text-align: center; padding: 7px 8px; }
-
-.section-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 8px; }
-.cat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+/* Categories: same full-width 3 columns, shorter tiles. */
+.cat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; border-radius: 14px; }
 .cat-btn {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
-  padding: 10px 6px; min-height: 76px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); color: var(--text);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  height: 60px; padding: 5px 6px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); color: var(--text); overflow: hidden;
 }
-.cat-btn .ico { font-size: 24px; line-height: 1; }
-.cat-btn .nm { font-size: 12px; line-height: 1.2; text-align: center; }
+.cat-btn .ico { font-size: 19px; line-height: 1; }
+.cat-btn .nm {
+  font-size: 11.5px; line-height: 1.15; text-align: center;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .cat-btn.sel { border-color: var(--accent); background: var(--accent-soft); }
 .income-mode .cat-btn.sel { border-color: var(--income); background: var(--income-soft); }
 .empty-note { color: var(--muted); font-size: 13.5px; grid-column: 1 / -1; padding: 8px 0; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.chip {
-  position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px;
-  background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; font-size: 14px;
+/* Subcategories hang directly off the chosen category. */
+.subchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.sub-lead { color: var(--muted); font-size: 12.5px; margin-right: 2px; }
+.subchip {
+  height: 36px; padding: 0 12px; border-radius: 9px; background: var(--panel2);
+  border: 1px solid var(--line); font-size: 14px; color: var(--text);
 }
-.chip .k { color: var(--muted); font-size: 12px; }
-.chip select, .chip input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.subchip.sel { border-color: var(--accent); background: var(--accent-soft); }
 
-details.more { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 0 14px; margin-bottom: 16px; }
-details.more summary { padding: 12px 0; cursor: pointer; color: var(--muted); font-size: 14px; }
-details.more[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 12px; }
-.subchips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.subchip { padding: 7px 12px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--line); font-size: 13.5px; color: var(--text); }
-.subchip.sel { border-color: var(--accent); color: var(--accent); }
-.more .text-input { margin-bottom: 14px; }
+/* By · On · With: same grid and height as the category tiles. */
+.meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.meta-tile {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 0; height: 60px; padding: 0 8px; text-align: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+}
+.meta-tile:focus-within { border-color: var(--accent); }
+/* In Income mode every focus highlight is green, matching the income tiles and Save button. */
+.income-mode .meta-tile:focus-within,
+.income-mode .text-input:focus { border-color: var(--income); }
+.income-mode .amount-input { caret-color: var(--income); }
+.income-mode :focus-visible { outline-color: var(--income); }
+.meta-tile .k { color: var(--muted); font-size: 11px; line-height: 1.2; }
+.meta-tile .v { max-width: 100%; font-size: 14px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta-tile select, .meta-tile input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 
-/* Save stays reachable above the tab bar however far the form scrolls. */
+/* Note: three visible lines, below By · On · With. */
+.note-input { display: block; margin-top: 10px; resize: none; line-height: 1.4; font-family: inherit; font-size: 14px; background: var(--panel); }
+
+/* Save bar: pinned above the tab bar; content fades out as it scrolls underneath. */
 .action-bar {
-  position: sticky; bottom: calc(var(--tabbar-h) + var(--safe-bottom)); z-index: 5;
-  margin: 0 -16px; padding: 10px 16px 4px; background: var(--bg);
-  box-shadow: 0 -14px 14px -10px var(--bg);
+  position: fixed; left: 0; right: 0; z-index: 30;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom));
+  padding: 10px 16px; background: var(--bg);
 }
-.actions { display: grid; grid-template-columns: auto 1fr; gap: 10px; }
-.hint { text-align: center; color: var(--muted); font-size: 13px; margin: 6px 0 0; min-height: 18px; }
+.action-bar::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -28px; height: 28px; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(15, 20, 25, 0), var(--bg));
+}
+.actions { display: grid; grid-template-columns: 1fr; gap: 10px; max-width: 560px; margin: 0 auto; }
+.actions.two { grid-template-columns: auto 1fr; }
+.actions .btn { height: 48px; padding-top: 0; padding-bottom: 0; }
+
+/* Missing required fields: a shake and a red glow on each Save tap. */
+.flag { animation: shake 0.4s ease, glow 1.6s ease-out; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+@keyframes glow {
+  0%, 35% { filter: drop-shadow(0 0 10px #f85149); }
+  100% { filter: drop-shadow(0 0 0 #f8514900); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flag { animation: glow 1.6s ease-out; }
+}
 
 /* ---------- bottom sheet (receipt scan) ---------- */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
@@ -287,6 +355,7 @@ td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
   font-size: 14px; box-shadow: 0 8px 24px #0009;
 }
 #toast button { background: none; border: 0; color: #1f6feb; font-weight: 700; padding: 0; }
+body.has-action-bar #toast { bottom: calc(var(--tabbar-h) + var(--safe-bottom) + var(--action-h) + 10px); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

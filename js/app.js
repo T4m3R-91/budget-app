@@ -17,13 +17,15 @@ const SCREENS = ["boot", "setup", "login", "notmember", ...Object.keys(TABS)];
 function showScreen(name, activeTab = name) {
   for (const s of SCREENS) $(`screen-${s}`).hidden = s !== name;
   $("tabbar").hidden = !(name in TABS);
+  document.body.classList.toggle("in-app", name in TABS);
+  document.body.classList.toggle("has-action-bar", name === "add");
   document.querySelectorAll("#tabbar a").forEach((a) => {
     const on = a.dataset.tab === activeTab;
     a.classList.toggle("active", on);
     if (on) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
-  window.scrollTo(0, 0);
+  document.querySelector("main").scrollTop = 0;
 }
 
 function route() {
