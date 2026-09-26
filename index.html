@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- maximum-scale stops iPhone auto-zooming into fields with text under 16px; pinch-zoom still works on iOS. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <title>Household Budget</title>
   <meta name="theme-color" content="#0f1419">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,9 +17,9 @@
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
-  <div id="offline-banner" class="banner" role="status" hidden>You're offline. Connect to the internet to save entries.</div>
-
   <main>
+    <div id="offline-banner" class="banner" role="status" hidden>You're offline. Connect to the internet to save entries.</div>
+
     <section id="screen-boot" class="screen center-screen">
       <p class="muted" id="boot-message">Loading…</p>
     </section>

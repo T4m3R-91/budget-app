@@ -10,7 +10,10 @@ import { scanReceipt } from "./receipt.js";
 
 const $ = (id) => document.getElementById(id);
 const screen = () => $("screen-add");
-const isVisible = () => !screen().hidden;
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Required fields that Save can point at when they're missing.
+const FIELDS = { amount: "e-amount-box", grid: "e-grid", rate: "e-rate" };
 
 let f = null; // form state
 let commitRateEdit = null; // set while the rate field is open, so Save can apply it
@@ -36,7 +39,7 @@ function freshForm(type = "expense") {
     rate: null, rateSource: null, rateNote: "", rateLoading: false, editingRate: false,
     categoryId: null, subcategoryId: null, sourceId: null,
     paymentMethodId: rememberedPayment(), who: state.me.email,
-    date: isoLocal(), description: "", moreOpen: false,
+    date: isoLocal(), description: "",
     saving: false, confirmDelete: false,
   };
 }
@@ -66,10 +69,10 @@ export async function showEdit(id) {
     ...freshForm(t.type),
     mode: "edit", id: t.id, original: t,
     amountText: String(Number(t.amount)), currency: t.currency,
-    rate: Number(t.rate), rateSource: "saved", rateNote: "saved with this entry",
+    rate: Number(t.rate), rateSource: "saved", rateNote: "saved",
     categoryId: t.category_id, subcategoryId: t.subcategory_id, sourceId: t.income_source_id,
     paymentMethodId: t.payment_method_id, who: t.who, date: t.occurred_on,
-    description: t.description || "", moreOpen: Boolean(t.subcategory_id || t.description),
+    description: t.description || "",
   };
   render();
 }
@@ -82,13 +85,12 @@ async function ensureRate({ force = false } = {}) {
   const userSet = () => form.rateSource === "edited" || form.rateSource === "manual";
   form.rateLoading = true;
   renderRate();
-  renderFooter();
 
   const live = navigator.onLine ? await getLiveRate({ force }) : null;
   if (form !== f || userSet()) return;
 
   if (live) {
-    Object.assign(form, { rate: live.rate, rateSource: "live", rateNote: `live, updated ${relativeDay(isoLocal(live.asOf))}` });
+    Object.assign(form, { rate: live.rate, rateSource: "live", rateNote: `live, ${relativeDay(isoLocal(live.asOf))}` });
   } else {
     let last = null;
     try { last = await latestEntryRate(); } catch { /* offline too */ }
@@ -96,89 +98,92 @@ async function ensureRate({ force = false } = {}) {
     if (last) {
       Object.assign(form, {
         rate: Number(last.rate), rateSource: "last_entry",
-        rateNote: `from your last entry (${relativeDay(last.occurred_on)}); rate service unreachable`,
+        rateNote: `last entry's (${relativeDay(last.occurred_on)}), live rate unavailable`,
       });
     } else if (!form.rate) {
-      Object.assign(form, { rateSource: null, rateNote: "couldn't reach the rate service" });
+      Object.assign(form, { rateSource: null, rateNote: "live rate unavailable" });
     }
   }
   form.rateLoading = false;
   renderRate();
   renderConverted();
-  renderFooter();
 }
 
 // ---------- rendering ----------
 
 function render() {
   const r = screen();
+  const income = f.type === "income";
   commitRateEdit = null;
-  r.classList.toggle("income-mode", f.type === "income");
+  r.classList.toggle("income-mode", income);
 
   const head =
     f.mode === "edit"
       ? el("div", { class: "entry-head" },
           el("a", { class: "link-btn", href: "#history", text: "Cancel" }),
-          el("h2", { text: f.type === "income" ? "Edit income" : "Edit expense" }),
+          el("h2", { text: income ? "Edit income" : "Edit expense" }),
           el("span"))
       : el("div", { class: "entry-head centered" }, typeSeg());
 
-  const amount = el("input", {
-    id: "e-amount", class: "amount-input", type: "text", inputmode: "decimal",
-    autocomplete: "off", enterkeyhint: "done", placeholder: "0", "aria-label": "Amount",
-    value: f.amountText,
-    oninput: (e) => { f.amountText = e.target.value; sizeAmount(); renderConverted(); renderFooter(); },
-  });
+  // The amount box shows the result of the currency row above it: unit beside the number,
+  // and the converted value underneath.
+  const amountBox = el("label", { id: "e-amount-box", class: "amount-box" },
+    el("span", { class: "amount-main" },
+      el("input", {
+        id: "e-amount", class: "amount-input", type: "text", inputmode: "decimal",
+        autocomplete: "off", enterkeyhint: "done", placeholder: "0", "aria-label": "Amount",
+        value: f.amountText,
+        oninput: (e) => {
+          f.amountText = e.target.value;
+          renderConverted();
+        },
+      }),
+      el("span", { id: "e-amount-cur", class: "amount-cur" })),
+    el("span", { id: "e-converted", class: "converted", "aria-live": "polite" }));
 
-  const more = el("details", { class: "more", open: f.moreOpen, ontoggle: (e) => { f.moreOpen = e.target.open; } },
-    el("summary", { text: f.type === "income" ? "More: note" : "More: subcategory, note" }),
-    el("div", { id: "e-subs", class: "subchips" }),
-    el("input", {
-      id: "e-desc", class: "text-input", type: "text", maxlength: 200, enterkeyhint: "done",
-      placeholder: f.type === "income" ? "Note (optional)" : "Note (optional), e.g. Carrefour",
-      "aria-label": "Note", value: f.description,
-      oninput: (e) => { f.description = e.target.value; },
-    }));
+  const amountRow = f.mode === "add"
+    ? el("div", { class: "amount-row" },
+        amountBox,
+        el("span", { class: "or", text: "or" }),
+        el("button", { type: "button", class: "btn secondary scan-btn", "aria-label": "Scan a receipt", onclick: pickPhoto },
+          el("span", { "aria-hidden": "true", text: "📷 " }), "Scan"))
+    : el("div", { class: "amount-row solo" }, amountBox);
 
-  const left =
-    f.mode === "edit"
-      ? el("button", { id: "e-delete", type: "button", class: "btn danger", text: "Delete", onclick: onDelete })
-      : el("button", { type: "button", class: "btn secondary", text: "📷 Scan", "aria-label": "Scan a receipt", onclick: pickPhoto });
+  const save = el("button", { id: "e-save", type: "button", class: "btn primary", onclick: save_ });
+  const actions = f.mode === "edit"
+    ? el("div", { class: "actions two" },
+        el("button", { id: "e-delete", type: "button", class: "btn danger", text: "Delete", onclick: onDelete }), save)
+    : el("div", { class: "actions" }, save);
 
   r.replaceChildren(
     head,
-    el("div", { class: "amount-wrap" }, el("span", { id: "e-amount-cur", class: "amount-cur" }), amount),
-    el("div", { id: "e-converted", class: "converted", "aria-live": "polite" }),
-    el("div", { class: "rate-row" },
+    el("div", { class: "cur-row" },
       el("div", { id: "e-cur-seg", class: "seg small", role: "group", "aria-label": "Currency" }),
       el("div", { id: "e-rate", class: "rate-box" })),
-    el("p", { class: "section-label", text: f.type === "income" ? "Source" : "Category" }),
-    el("div", { id: "e-grid", class: "cat-grid" }),
-    el("div", { id: "e-chips", class: "chips" }),
-    more,
-    el("div", { class: "action-bar" },
-      el("div", { class: "actions" }, left, el("button", { id: "e-save", type: "button", class: "btn primary", onclick: save })),
-      el("p", { id: "e-hint", class: "hint", "aria-live": "polite" }))
+    amountRow,
+    el("div", { id: "e-grid", class: "cat-grid", role: "group", "aria-label": income ? "Source" : "Category" }),
+    el("div", { id: "e-subs", class: "subchips", role: "group", "aria-label": "Subcategory" }),
+    el("div", { id: "e-meta", class: "meta-grid" }),
+    el("textarea", {
+      id: "e-desc", class: "text-input note-input", rows: 3, maxlength: 200,
+      placeholder: income ? "Note (optional)" : "Note (optional), e.g. Negmet Heliopolis",
+      "aria-label": "Note", value: f.description,
+      oninput: (e) => { f.description = e.target.value; },
+    }),
+    el("div", { class: "action-bar" }, actions)
   );
 
-  sizeAmount();
   renderCurrency();
   renderRate();
   renderConverted();
   renderGrid();
-  renderChips();
   renderSubs();
-  renderFooter();
-}
-
-// Grows the amount field with its text so the currency label stays right beside the number.
-function sizeAmount() {
-  const input = $("e-amount");
-  if (input) input.style.width = `${Math.max(1, input.value.length) + 0.3}ch`;
+  renderMeta();
+  renderSaveButton();
 }
 
 function typeSeg() {
-  return el("div", { class: "seg", role: "group", "aria-label": "Entry type" },
+  return el("div", { class: "seg type-seg", role: "group", "aria-label": "Entry type" },
     ["expense", "income"].map((t) =>
       el("button", {
         type: "button",
@@ -197,15 +202,11 @@ function setCurrency(c) {
 
 function renderCurrency() {
   $("e-amount-cur").textContent = f.currency;
-  $("e-cur-seg").replaceChildren(...currencyButtons(setCurrency));
-}
-
-function currencyButtons(onPick) {
-  return ["EGP", "USD"].map((c) =>
+  $("e-cur-seg").replaceChildren(...["EGP", "USD"].map((c) =>
     el("button", {
       type: "button", class: f.currency === c ? "active" : "", "aria-pressed": String(f.currency === c),
-      text: c, onclick: () => onPick(c),
-    }));
+      text: c, onclick: () => setCurrency(c),
+    })));
 }
 
 function renderRate() {
@@ -229,7 +230,7 @@ function renderRate() {
       f.editingRate = false;
       commitRateEdit = null;
     };
-    const done = () => { commitRateEdit(); renderRate(); renderConverted(); renderFooter(); };
+    const done = () => { commitRateEdit(); renderRate(); renderConverted(); };
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
     box.replaceChildren(
       el("span", { class: "rate-line", text: "1 USD =" }), input, el("span", { class: "rate-line", text: "EGP" }),
@@ -240,7 +241,7 @@ function renderRate() {
   }
 
   const warn = !f.rateLoading && (!f.rate || f.rateSource === "last_entry");
-  let line = f.rate ? `1 USD = ${fmtRate(f.rate)} EGP` : f.rateLoading ? "Getting today's rate…" : "No exchange rate yet";
+  let line = f.rate ? `1 USD = ${fmtRate(f.rate)} EGP` : f.rateLoading ? "Getting today's rate…" : "No rate yet";
   if (f.rateNote && !(f.rateLoading && !f.rate)) line += ` · ${f.rateNote}`;
 
   const parts = [
@@ -252,7 +253,7 @@ function renderRate() {
   ];
   if (f.mode === "add" && ["edited", "manual", "last_entry"].includes(f.rateSource)) {
     parts.push(el("button", {
-      type: "button", class: "link-btn", text: "Use live rate",
+      type: "button", class: "link-btn", text: "Use live",
       onclick: () => { f.rateSource = null; f.rateNote = ""; ensureRate({ force: true }); },
     }));
   }
@@ -301,82 +302,103 @@ function pick(id) {
     renderSubs();
   }
   renderGrid();
-  renderFooter();
 }
 
+// Subcategory chips appear only once a category with subcategories is picked (expenses only).
 function renderSubs() {
   const box = $("e-subs");
   if (!box) return;
-  box.hidden = f.type === "income";
-  if (f.type === "income") return;
-  if (!f.categoryId) {
-    box.replaceChildren(el("span", { class: "muted small", text: "Pick a category to see its subcategories." }));
-    return;
-  }
-  const subs = subcategoriesOf(f.categoryId).filter((s) => !s.hidden || s.id === f.subcategoryId);
-  if (!subs.length) {
-    box.replaceChildren(el("span", { class: "muted small", text: "This category has no subcategories." }));
-    return;
-  }
-  box.replaceChildren(...subs.map((s) =>
-    el("button", {
-      type: "button", class: "subchip" + (s.id === f.subcategoryId ? " sel" : ""),
-      "aria-pressed": String(s.id === f.subcategoryId), text: s.name,
-      onclick: () => { f.subcategoryId = f.subcategoryId === s.id ? null : s.id; renderSubs(); },
-    })));
+  const category = f.type === "expense" ? byId(state.categories, f.categoryId) : null;
+  const subs = category ? subcategoriesOf(category.id).filter((s) => !s.hidden || s.id === f.subcategoryId) : [];
+  box.hidden = !subs.length;
+  if (!subs.length) return;
+  box.replaceChildren(
+    el("span", { class: "sub-lead", text: `${category.name} ›` }),
+    ...subs.map((s) =>
+      el("button", {
+        type: "button", class: "subchip" + (s.id === f.subcategoryId ? " sel" : ""),
+        "aria-pressed": String(s.id === f.subcategoryId), text: s.name,
+        onclick: () => { f.subcategoryId = f.subcategoryId === s.id ? null : s.id; renderSubs(); },
+      })));
 }
 
-function selectChip(label, options, value, onChange) {
-  const current = options.find((o) => o.value === value) || options[0];
-  const select = el("select", { "aria-label": label, onchange: (e) => onChange(e.target.value) },
+function metaTile(label, value, control) {
+  return el("label", { class: "meta-tile" },
+    el("span", { class: "k", text: label }), el("span", { class: "v", text: value }), control);
+}
+
+function selectControl(ariaLabel, options, value, onChange) {
+  return el("select", { "aria-label": ariaLabel, onchange: (e) => onChange(e.target.value) },
     options.map((o) => el("option", { value: o.value, text: o.label, selected: o.value === value })));
-  return el("label", { class: "chip" },
-    el("span", { class: "k", text: label }), el("span", { text: current?.label ?? "—" }), select);
 }
 
-function renderChips() {
-  const date = el("label", { class: "chip" },
-    el("span", { class: "k", text: "Date" }),
-    el("span", { text: friendlyDate(f.date) }),
-    el("input", {
-      type: "date", "aria-label": "Date", value: f.date,
-      onchange: (e) => { if (e.target.value) { f.date = e.target.value; renderChips(); } },
-    }));
-
-  const chips = [date];
-  if (f.type === "expense") {
-    const payments = state.paymentMethods
-      .filter((p) => !p.hidden || p.id === f.paymentMethodId)
-      .map((p) => ({ value: p.id, label: p.name }));
-    chips.push(selectChip("Paid with", [{ value: "", label: "Not set" }, ...payments], f.paymentMethodId ?? "",
-      (v) => { f.paymentMethodId = v || null; renderChips(); }));
-  }
+// By · On · With (income: By · On), laid out on the same 3-column grid as the categories.
+function renderMeta() {
+  const income = f.type === "income";
   const people = state.members.map((m) => ({
     value: m.email, label: m.email === state.me.email ? `${m.display_name} (you)` : m.display_name,
   }));
-  chips.push(selectChip(f.type === "income" ? "Received by" : "Paid by", people, f.who,
-    (v) => { f.who = v; renderChips(); renderFooter(); }));
-
-  $("e-chips").replaceChildren(...chips);
+  const tiles = [
+    metaTile("By", people.find((p) => p.value === f.who)?.label ?? "—",
+      selectControl(income ? "Received by" : "Paid by", people, f.who, (v) => { f.who = v; renderMeta(); })),
+    metaTile("On", friendlyDate(f.date),
+      el("input", {
+        type: "date", "aria-label": "Date", value: f.date,
+        onchange: (e) => { if (e.target.value) { f.date = e.target.value; renderMeta(); } },
+        // With a mouse, a click on the (invisible) field doesn't open the calendar by itself.
+        onclick: (e) => {
+          if (!window.matchMedia("(pointer: fine)").matches) return;
+          try { e.currentTarget.showPicker(); } catch { /* older browsers: the field still takes typing */ }
+        },
+      })),
+  ];
+  if (!income) {
+    const payments = [{ value: "", label: "Not set" }, ...state.paymentMethods
+      .filter((p) => !p.hidden || p.id === f.paymentMethodId)
+      .map((p) => ({ value: p.id, label: p.name }))];
+    const current = f.paymentMethodId ?? "";
+    tiles.push(metaTile("With", payments.find((p) => p.value === current)?.label ?? "Not set",
+      selectControl("Paid with", payments, current, (v) => { f.paymentMethodId = v || null; renderMeta(); })));
+  }
+  $("e-meta").replaceChildren(...tiles);
 }
 
-function problem() {
-  if (!navigator.onLine) return "You're offline. Connect to save.";
-  if (parseAmount(f.amountText) == null) return "Enter an amount.";
-  if (f.type === "expense" && !f.categoryId) return "Pick a category.";
-  if (f.type === "income" && !f.sourceId) return "Pick a source.";
-  if (!(f.rate > 0)) return f.rateLoading ? "Getting today's exchange rate…" : "Enter the exchange rate.";
-  if (!f.who) return "Choose who paid.";
-  return null;
+function renderSaveButton() {
+  const button = $("e-save");
+  if (!button) return;
+  button.disabled = f.saving;
+  button.textContent = f.saving ? "Saving…" : f.mode === "edit" ? "Save changes" : f.type === "income" ? "Save income" : "Save expense";
 }
 
-function renderFooter() {
-  const save = $("e-save");
-  if (!save) return;
-  const p = problem();
-  save.disabled = Boolean(p) || f.saving;
-  save.textContent = f.saving ? "Saving…" : f.mode === "edit" ? "Save changes" : f.type === "income" ? "Save income" : "Save expense";
-  $("e-hint").textContent = f.saving ? "" : p || "";
+// ---------- missing required fields ----------
+
+function missingFields() {
+  const missing = [];
+  if (parseAmount(f.amountText) == null) missing.push("amount");
+  if (f.type === "expense" ? !f.categoryId : !f.sourceId) missing.push("grid");
+  if (!(f.rate > 0) && !f.rateLoading) missing.push("rate");
+  return missing;
+}
+
+// Shakes and glows each missing field, and takes you to the first one.
+function flag(missing) {
+  for (const name of missing) {
+    const node = $(FIELDS[name]);
+    node.classList.remove("flag");
+    void node.offsetWidth; // restart the animation on repeated taps
+    node.classList.add("flag");
+    // Two animations run (shake, then the longer glow); clear only when the glow is done.
+    const done = (e) => {
+      if (e.animationName !== "glow") return;
+      node.classList.remove("flag");
+      node.removeEventListener("animationend", done);
+    };
+    node.addEventListener("animationend", done);
+  }
+  const first = missing[0];
+  $(FIELDS[first]).scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+  if (first === "amount") $("e-amount").focus({ preventScroll: true });
+  if (first === "rate") { f.editingRate = true; renderRate(); }
 }
 
 // ---------- save / delete / undo ----------
@@ -385,15 +407,22 @@ function nameOf(t) {
   return t.type === "income" ? byId(state.incomeSources, t.income_source_id)?.name : byId(state.categories, t.category_id)?.name;
 }
 
-async function save() {
+async function save_() {
+  if (f.saving) return;
   if (commitRateEdit) {
     commitRateEdit();
     renderRate();
+    renderConverted();
   }
-  if (problem() || f.saving) {
-    renderFooter();
+  const missing = missingFields();
+  if (missing.length) {
+    flag(missing);
+    if (!navigator.onLine) toast("You're offline. Connect to the internet to save.");
     return;
   }
+  if (f.rateLoading && !(f.rate > 0)) return toast("Getting today's exchange rate. Try again in a moment.");
+  if (!navigator.onLine) return toast("You're offline. Connect to the internet to save.");
+
   const form = f;
   const expense = form.type === "expense";
   const row = {
@@ -412,7 +441,7 @@ async function save() {
   };
 
   form.saving = true;
-  renderFooter();
+  renderSaveButton();
   try {
     if (form.mode === "edit") {
       await updateTransaction(form.id, row);
@@ -433,10 +462,11 @@ async function save() {
     f = freshForm(form.type);
     if (keepLive) Object.assign(f, { rate: form.rate, rateSource: "live", rateNote: form.rateNote });
     render();
+    document.querySelector("main").scrollTop = 0;
     if (!keepLive) ensureRate();
   } catch (e) {
     form.saving = false;
-    if (form === f) renderFooter();
+    if (form === f) renderSaveButton();
     toast(friendlyError(e));
   }
 }
@@ -498,16 +528,13 @@ async function runScan(file) {
   const fill = el("div");
   const progress = el("div", { class: "progress" }, fill);
   const results = el("div");
-  const curSeg = el("div", { class: "seg small", role: "group", "aria-label": "Receipt currency" });
-  const paintCurrency = () => curSeg.replaceChildren(...currencyButtons((c) => { setCurrency(c); paintCurrency(); }));
-  paintCurrency();
 
   const close = () => backdrop.remove();
   const backdrop = el("div", { class: "sheet-backdrop", onclick: (e) => { if (e.target === backdrop) close(); } },
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Scan a receipt" },
       el("h3", { text: "Reading your receipt" }),
       status, progress, results,
-      el("div", { class: "sheet-row" }, el("span", { class: "muted small", text: "Currency on this receipt" }), curSeg),
+      el("p", { class: "muted small", text: `Amounts are in ${f.currency}, as set on the Add screen.` }),
       el("button", { type: "button", class: "btn secondary full", text: "Close", onclick: close })));
   document.body.append(backdrop);
 
@@ -531,9 +558,7 @@ async function runScan(file) {
           onclick: () => {
             f.amountText = String(c.value);
             $("e-amount").value = f.amountText;
-            sizeAmount();
             renderConverted();
-            renderFooter();
             close();
           },
         }))));
@@ -546,10 +571,5 @@ async function runScan(file) {
 // ---------- connectivity ----------
 
 window.addEventListener("online", () => {
-  if (!f || !isVisible()) return;
-  renderFooter();
-  if (f.mode === "add" && !f.rate) ensureRate();
-});
-window.addEventListener("offline", () => {
-  if (f && isVisible()) renderFooter();
+  if (f && !screen().hidden && f.mode === "add" && !f.rate) ensureRate();
 });
