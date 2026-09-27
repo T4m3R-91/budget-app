@@ -454,9 +454,11 @@ async function save_() {
     if (row.payment_method_id) {
       try { localStorage.setItem(lastPaymentKey(), row.payment_method_id); } catch { /* storage unavailable */ }
     }
-    toast(`Saved ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency)}`, {
+    // Points are scored by the database; `points` is absent until points-migration.sql has run.
+    const earned = Number.isInteger(saved.points) ? saved.points : null;
+    toast(`Saved ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency)}${earned ? ` · +${earned} pts` : ""}`, {
       label: "Undo",
-      run: () => undo(saved.id),
+      run: () => undo(saved.id, earned),
     });
     const keepLive = form.rateSource === "live";
     f = freshForm(form.type);
@@ -471,10 +473,10 @@ async function save_() {
   }
 }
 
-async function undo(id) {
+async function undo(id, points) {
   try {
     await deleteTransaction(id);
-    toast("Entry removed");
+    toast(points ? `Entry removed · −${points} pts` : "Entry removed");
   } catch (e) {
     toast(friendlyError(e));
   }
