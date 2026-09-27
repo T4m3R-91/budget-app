@@ -65,6 +65,11 @@ export async function latestEntryRate() {
   );
 }
 
+// [{ email, display_name, all_time, this_month }], one row per household member.
+export async function fetchLeaderboard() {
+  return unwrap(await sb.from("points_leaderboard").select("*"));
+}
+
 export async function insertListItem(table, row) {
   return unwrap(await sb.from(table).insert(row).select().single());
 }

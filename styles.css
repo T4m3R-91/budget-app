@@ -332,6 +332,22 @@ td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
 .inline-form .icon-input { flex: 0 0 56px; text-align: center; }
 .li-row.editing { flex-wrap: wrap; }
 .acct { margin: 0 0 12px; }
+
+/* Points: your total, then the household leaderboard. */
+.points { margin-bottom: 14px; }
+.points-total {
+  display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;
+  padding: 10px 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+}
+.points-total strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.lb-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
+.lb-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.lb-list { list-style: none; margin: 0; padding: 0; }
+.lb-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 6px; padding: 9px 2px; border-top: 1px solid var(--line); }
+.lb-row:first-child { border-top: 0; }
+.lb-star { font-size: 16px; text-align: center; }
+.lb-pts { color: var(--muted); font-variant-numeric: tabular-nums; }
+.lb-row.leader .lb-name, .lb-row.leader .lb-pts { color: var(--text); font-weight: 600; }
 .stack { display: grid; gap: 10px; }
 .app-version { text-align: center; color: var(--faint); font-size: 12px; }
 
