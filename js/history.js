@@ -94,12 +94,12 @@ function row(t) {
     .filter(Boolean)
     .join(" · ");
   const other = t.currency === "USD" ? fmtMoney(t.amount_egp, "EGP") : fmtMoney(t.amount_usd, "USD");
-  return el("a", { class: "txn-row", href: `#edit/${t.id}` },
+  return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}` },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: kind?.name || "Unknown" }),
       el("span", { class: "txn-sub", text: detail })),
-    el("span", { class: "txn-amt" + (income ? " income" : "") },
-      (income ? "+" : "") + fmtMoney(t.amount, t.currency),
+    el("span", { class: "txn-amt" },
+      (income ? "+" : "−") + fmtMoney(t.amount, t.currency),
       el("span", { class: "alt", text: `≈ ${other}` })));
 }

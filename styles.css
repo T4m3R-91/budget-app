@@ -11,6 +11,8 @@
   --accent-soft: #4f9dff1f;
   --income: #2bb67a;
   --income-soft: #2bb67a1f;
+  --expense: #f85149;
+  --expense-soft: #f851491f;
   --good: #3fb950;
   --warn: #f0a020;
   --critical: #f85149;
@@ -249,7 +251,14 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 .txn-title { font-weight: 600; font-size: 14.5px; }
 .txn-sub { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .txn-amt { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
-.txn-amt.income { color: var(--income); }
+/* Money in is green, money out is red: the whole row is tinted (over the panel color),
+   the icon tile a shade deeper, and the amount in full color. */
+.txn-row.income { background: linear-gradient(var(--income-soft), var(--income-soft)), var(--panel); }
+.txn-row.income .txn-ico { background: var(--income-soft); }
+.txn-row.income .txn-amt { color: var(--income); }
+.txn-row.expense { background: linear-gradient(var(--expense-soft), var(--expense-soft)), var(--panel); }
+.txn-row.expense .txn-ico { background: var(--expense-soft); }
+.txn-row.expense .txn-amt { color: var(--expense); }
 .txn-amt .alt { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 .list-foot { text-align: center; color: var(--muted); font-size: 13.5px; padding: 16px 0; }
 
