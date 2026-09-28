@@ -1,29 +1,37 @@
-// Day/Night theme, the household's lists (add / rename / reorder / hide) and Excel export.
-// Account is in Profile. Items are hidden rather than deleted so past entries keep their category names.
+// The Settings card in Profile, collapsed until opened: Day/Night theme and the household's lists
+// (add / rename / reorder / hide). Items are hidden rather than deleted so past entries keep
+// their category names.
 
 import { state, subcategoriesOf } from "./state.js";
 import { el, toast, friendlyError, themeChoice, setThemeChoice } from "./ui.js";
 import { reloadLists, insertListItem, updateListItem } from "./db.js";
-import { exportToExcel } from "./export.js";
 
 const expanded = new Set(); // categories whose subcategory list is open
 let editing = null; // "table:id" of the row being renamed
+let open = false; // the card starts collapsed; it stays as you left it while the app is open
+let card = null;
 
-export function showSettings() {
+export function settingsCard() {
   editing = null;
+  card = el("section", { class: "set-section settings-card" });
   render();
+  return card;
 }
 
 function render() {
-  document.getElementById("screen-settings").replaceChildren(
-    el("h2", { class: "screen-title", text: "Settings" }),
-    appearanceSection(),
-    listSection({ title: "Categories", table: "categories", items: state.categories, withIcon: true, nested: true }),
-    listSection({ title: "Payment methods", table: "payment_methods", items: state.paymentMethods }),
-    listSection({ title: "Income sources", table: "income_sources", items: state.incomeSources, withIcon: true }),
-    exportSection(),
-    el("p", { class: "app-version", text: "Household Budget 1.0" })
-  );
+  card.replaceChildren(
+    el("h3", { class: "collapse-head" },
+      el("button", {
+        type: "button", "aria-expanded": String(open), onclick: () => { open = !open; render(); },
+      }, el("span", { text: "Settings" }), el("span", { class: "chev", "aria-hidden": "true", text: "▸" }))),
+    ...(open
+      ? [
+          appearanceSection(),
+          listSection({ title: "Categories", table: "categories", items: state.categories, withIcon: true, nested: true }),
+          listSection({ title: "Payment methods", table: "payment_methods", items: state.paymentMethods }),
+          listSection({ title: "Income sources", table: "income_sources", items: state.incomeSources, withIcon: true }),
+        ]
+      : []));
   document.getElementById("rename-input")?.focus();
 }
 
@@ -144,28 +152,4 @@ function move(table, items, i, dir) {
     .map((x, idx) => ({ x, sort: (idx + 1) * 10 }))
     .filter(({ x, sort }) => x.sort_order !== sort);
   change(() => Promise.all(updates.map(({ x, sort }) => updateListItem(table, x.id, { sort_order: sort }))));
-}
-
-// ---------- export ----------
-
-function exportSection() {
-  const button = el("button", {
-    type: "button", class: "btn secondary full", text: "Export to Excel",
-    onclick: async () => {
-      button.disabled = true;
-      button.textContent = "Preparing file…";
-      try {
-        const counts = await exportToExcel();
-        toast(`Exported ${counts.expenses} expenses and ${counts.income} income entries`);
-      } catch (e) {
-        toast(friendlyError(e));
-      }
-      button.disabled = false;
-      button.textContent = "Export to Excel";
-    },
-  });
-  return el("section", { class: "set-section" },
-    el("h3", { text: "Export" }),
-    el("p", { class: "note", text: "Downloads everything as an Excel file with Transactions and Income tabs, in the same layout as your spreadsheet." }),
-    button);
 }

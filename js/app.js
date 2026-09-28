@@ -6,20 +6,22 @@ import { el, friendlyError, applyTheme } from "./ui.js";
 import { showAdd, showEdit } from "./entry.js";
 import { showHistory } from "./history.js";
 import { showDashboard } from "./dashboard.js";
-import { showSettings } from "./settings.js";
 import { showProfile } from "./profile.js";
+import { showBudget, showBudgetEditor } from "./budget.js";
 
 window.__appStarted = true;
 
 const $ = (id) => document.getElementById(id);
-const TABS = { add: showAdd, history: showHistory, dashboard: showDashboard, settings: showSettings, profile: showProfile };
-const SCREENS = ["boot", "setup", "login", "notmember", ...Object.keys(TABS)];
+const TABS = { add: showAdd, history: showHistory, dashboard: showDashboard, budget: showBudget, profile: showProfile };
+const SCREENS = ["boot", "setup", "login", "notmember", "budgetform", ...Object.keys(TABS)];
+const WITH_ACTION_BAR = ["add", "budgetform"]; // screens with a pinned Save bar
 
 function showScreen(name, activeTab = name) {
   for (const s of SCREENS) $(`screen-${s}`).hidden = s !== name;
-  $("tabbar").hidden = !(name in TABS);
-  document.body.classList.toggle("in-app", name in TABS);
-  document.body.classList.toggle("has-action-bar", name === "add");
+  const inApp = name in TABS || name === "budgetform";
+  $("tabbar").hidden = !inApp;
+  document.body.classList.toggle("in-app", inApp);
+  document.body.classList.toggle("has-action-bar", WITH_ACTION_BAR.includes(name));
   document.querySelectorAll("#tabbar a").forEach((a) => {
     const on = a.dataset.tab === activeTab;
     a.classList.toggle("active", on);
@@ -35,6 +37,15 @@ function route() {
   if (hash.startsWith("#edit/")) {
     showScreen("add", "history");
     showEdit(decodeURIComponent(hash.slice(6)));
+    return;
+  }
+  if (hash.startsWith("#budget/")) {
+    showScreen("budgetform", "budget");
+    showBudgetEditor(hash.slice(8));
+    return;
+  }
+  if (hash === "#settings") { // Settings now lives in Profile; old links and bookmarks land there
+    location.replace("#profile");
     return;
   }
   const tab = hash.slice(1) in TABS ? hash.slice(1) : "add";
