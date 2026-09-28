@@ -386,6 +386,27 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 .chart-box { position: relative; height: 300px; }
 .chart-empty { color: var(--muted); font-size: 13.5px; display: grid; place-items: center; height: 100%; }
 
+/* Spend by category: treemap tiles, the spend blue blended into the card (--mix, set per tile:
+   stronger for bigger shares). The 2px border in the card's color draws the gaps between tiles. */
+.treemap { position: relative; height: 210px; }
+.tm-tile {
+  position: absolute; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 7px 9px; border: 2px solid var(--panel); border-radius: 10px; overflow: hidden; text-align: left;
+  background: color-mix(in srgb, var(--accent) var(--mix), var(--panel)); color: var(--text);
+  font-size: 12.5px; line-height: 1.3;
+}
+.tm-tile.picked { box-shadow: inset 0 0 0 2px var(--accent); }
+.tm-name { max-width: 100%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tm-pct { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.tm-ico { font-size: 16px; line-height: 1.2; }
+/* Per tile, whatever fits (set in dashboard.js): */
+.fit-full .tm-ico, .fit-mid .tm-ico, .fit-mid .tm-amt { display: none; }
+.fit-icon, .fit-pct { padding: 2px; align-items: center; justify-content: center; }
+.fit-icon .tm-name, .fit-icon .tm-amt,
+.fit-pct .tm-ico, .fit-pct .tm-name, .fit-pct .tm-amt, .fit-none > * { display: none; }
+.tm-detail { margin: 10px 2px 0; font-size: 13px; line-height: 1.45; min-height: 19px; }
+
 .table-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .table-wrap { overflow: auto; max-height: 480px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
