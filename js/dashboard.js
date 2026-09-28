@@ -529,7 +529,12 @@ function paintTreemap() {
   const W = box.clientWidth, H = box.clientHeight;
   if (!W || !H) return; // hidden; the size observer paints once it's on screen
   const rects = squarify(tiles.map((t) => t.amount), W, H);
-  const mixes = ["58%", "44%", "34%", "26%", "18%"]; // bigger share, stronger blue
+  // The top category is exactly the Cash flow chart's spend blue. Every other tile (Other too)
+  // gets that blue in proportion to its amount compared with the top one (Food at 18% of Housing
+  // is an 18% blue), blended toward a pale blue so the dark text stays readable. 5% at least,
+  // so even the smallest tile keeps a hint of blue.
+  const top = tiles[0].amount;
+  const mix = (t) => `${Math.min(100, Math.max(5, (t.amount / top) * 100)).toFixed(1)}%`;
   box.replaceChildren(...tiles.map((t, i) => {
     const { x, y, w, h } = rects[i];
     // What fits (lines are ~16px, padding 18px across / 18px down): name + amount + %, name + %,
@@ -538,8 +543,8 @@ function paintTreemap() {
     const fit = w >= Math.max(80, amountWidth) && h >= 66 ? "full" : w >= 72 && h >= 50 ? "mid"
       : w >= 30 && h >= 44 && t.icon ? "icon" : w >= 30 && h >= 22 ? "pct" : "none";
     return el("button", {
-      type: "button", class: `tm-tile fit-${fit}${treemap.picked === t.key ? " picked" : ""}`,
-      style: `left:${(x / W) * 100}%;top:${(y / H) * 100}%;width:${(w / W) * 100}%;height:${(h / H) * 100}%;--mix:${t.parts ? "12%" : mixes[i]}`,
+      type: "button", class: `tm-tile fit-${fit}${i === 0 && !t.parts ? " top" : ""}${treemap.picked === t.key ? " picked" : ""}`,
+      style: `left:${(x / W) * 100}%;top:${(y / H) * 100}%;width:${(w / W) * 100}%;height:${(h / H) * 100}%;--mix:${mix(t)}`,
       title: tileSummary(t), "aria-label": tileSummary(t),
       onclick: () => { treemap.picked = treemap.picked === t.key ? null : t.key; paintTreemap(); },
     },

@@ -75,10 +75,17 @@ function tileBudget(categoryId) {
   const budget = budgetTiles.budget.get(categoryId);
   if (!budget) return null;
   const spent = budgetTiles.spent.get(categoryId) || 0;
-  const plain = (n) => Math.round(n).toLocaleString("en-US");
-  return spent > budget
-    ? { used: 100, over: true, text: `${plain(spent - budget)} over` }
-    : { used: (spent / budget) * 100, over: false, text: `${plain(budget - spent)} left` };
+  // Budgets are EGP. With the entry in USD, show the USD equivalent, marked ≈ as in History:
+  // what's left at the rate on screen; an overflow as that share of the category's saved USD
+  // spending, the same figure the Budget tab shows.
+  const inUsd = f.currency === "USD" && f.rate > 0;
+  const egp = (n) => fmtMoney(n, "EGP", { decimals: 0 });
+  const usd = (n) => `≈ ${fmtMoney(n, "USD", { decimals: 0, code: true })}`;
+  if (spent > budget) {
+    const overUsd = ((spent - budget) / spent) * (budgetTiles.spentUsd.get(categoryId) || 0);
+    return { used: 100, over: true, text: `${inUsd ? usd(overUsd) : egp(spent - budget)} over` };
+  }
+  return { used: (spent / budget) * 100, over: false, text: `${inUsd ? usd((budget - spent) / f.rate) : egp(budget - spent)} left` };
 }
 
 export async function showEdit(id) {
@@ -136,6 +143,7 @@ async function ensureRate({ force = false } = {}) {
   form.rateLoading = false;
   renderRate();
   renderConverted();
+  if (form.currency === "USD") renderGrid(); // USD budget figures use this rate
 }
 
 // ---------- rendering ----------
@@ -233,6 +241,7 @@ function setCurrency(c) {
   f.currency = c;
   renderCurrency();
   renderConverted();
+  renderGrid(); // budget tiles show what's left in the entry's currency
 }
 
 function renderCurrency() {
@@ -265,7 +274,7 @@ function renderRate() {
       f.editingRate = false;
       commitRateEdit = null;
     };
-    const done = () => { commitRateEdit(); renderRate(); renderConverted(); };
+    const done = () => { commitRateEdit(); renderRate(); renderConverted(); renderGrid(); };
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
     box.replaceChildren(
       el("span", { class: "rate-line", text: "1 USD =" }), input, el("span", { class: "rate-line", text: "EGP" }),
@@ -512,6 +521,7 @@ async function save_() {
     // Count it on its category tile right away; the refetch below catches anyone else's entries.
     if (expense && budgetTiles?.month === monthOf(row.occurred_on)) {
       budgetTiles.spent.set(row.category_id, (budgetTiles.spent.get(row.category_id) || 0) + Number(saved.amount_egp));
+      budgetTiles.spentUsd.set(row.category_id, (budgetTiles.spentUsd.get(row.category_id) || 0) + Number(saved.amount_usd));
     }
     const keepLive = form.rateSource === "live";
     f = freshForm(form.type);

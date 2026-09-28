@@ -14,6 +14,9 @@
   --faint: #3b4652;
   --accent: #4f9dff;
   --accent-soft: #4f9dff1f;
+  --tile-pale: #e6edf3; /* treemap: the pale end of its blues */
+  --tile-ink: #0f1419; /* treemap text: dark on every tile */
+  --tile-top-ink: #0f1419; /* ...including the solid-blue top tile, since this blue is light */
   --income: #2bb67a;
   --income-soft: #2bb67a1f;
   --expense: #f85149;
@@ -52,6 +55,9 @@
   --faint: #afb8c1;
   --accent: #0969da;
   --accent-soft: #0969da1a;
+  --tile-pale: #ffffff;
+  --tile-ink: #1f2328;
+  --tile-top-ink: #ffffff; /* Day's spend blue is deep: dark text on it would be hard to read */
   --income: #1a7f37;
   --income-soft: #1a7f371a;
   --expense: #cf222e;
@@ -394,12 +400,8 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 
 .chart-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
-/* Wide screens: the same 3 columns and gap as the totals above, so Cash flow (2 columns) lines
-   up exactly with Total spend + Total income, and the treemap with Net. */
-@media (min-width: 1000px) {
-  .chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-  .chart-grid > :first-child { grid-column: span 2; }
-}
+/* Each chart gets its own full-width row at every screen size, so the treemap fills its card
+   instead of sitting beside Cash flow with empty space under it. */
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
 .card h3 { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
@@ -443,16 +445,19 @@ a.btn { display: inline-block; text-decoration: none; }
 .bud-edit-total { display: flex; justify-content: space-between; margin: 12px 4px 0; font-size: 15px; }
 .bud-edit-total strong { font-variant-numeric: tabular-nums; }
 
-/* Spend by category: treemap tiles, the spend blue blended into the card (--mix, set per tile:
-   stronger for bigger shares). The 2px border in the card's color draws the gaps between tiles. */
+/* Spend by category: treemap tiles, the spend blue blended toward a pale blue (--mix, set per
+   tile: stronger for bigger shares; the top one is solid spend blue). All tiles use dark text.
+   The 2px border in the card's color draws the gaps between tiles. */
 .treemap { position: relative; height: 210px; }
 .tm-tile {
   position: absolute; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
   padding: 7px 9px; border: 2px solid var(--panel); border-radius: 10px; overflow: hidden; text-align: left;
-  background: color-mix(in srgb, var(--accent) var(--mix), var(--panel)); color: var(--text);
+  background: color-mix(in srgb, var(--accent) var(--mix), var(--tile-pale)); color: var(--tile-ink);
   font-size: 12.5px; line-height: 1.3;
 }
-.tm-tile.picked { box-shadow: inset 0 0 0 2px var(--accent); }
+.tm-tile.picked { box-shadow: inset 0 0 0 2px var(--tile-ink); }
+.tm-tile.top { color: var(--tile-top-ink); }
+.tm-tile.top.picked { box-shadow: inset 0 0 0 2px var(--tile-top-ink); }
 .tm-name { max-width: 100%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tm-amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tm-pct { opacity: 0.75; font-variant-numeric: tabular-nums; }
