@@ -93,13 +93,13 @@ function row(t) {
   const detail = [byId(state.subcategories, t.subcategory_id)?.name, t.description, memberName(t.who)]
     .filter(Boolean)
     .join(" · ");
-  const other = t.currency === "USD" ? fmtMoney(t.amount_egp, "EGP") : fmtMoney(t.amount_usd, "USD");
+  const other = t.currency === "USD" ? fmtMoney(t.amount_egp, "EGP") : fmtMoney(t.amount_usd, "USD", { code: true });
   return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}` },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: kind?.name || "Unknown" }),
       el("span", { class: "txn-sub", text: detail })),
     el("span", { class: "txn-amt" },
-      (income ? "+" : "−") + fmtMoney(t.amount, t.currency),
+      (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
       el("span", { class: "alt", text: `≈ ${other}` })));
 }

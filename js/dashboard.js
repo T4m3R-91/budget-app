@@ -2,22 +2,28 @@
 // KPI, chart and the table; EGP/USD switches between each row's frozen converted amounts.
 
 import { state, byId, memberName } from "./state.js";
-import { el, fmtMoney, friendlyError, loadScript } from "./ui.js";
+import { el, fmtMoney, friendlyError, loadScript, loadStyle, toast, isoLocal, parseISODate } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
 
 const CHART_JS = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
+const FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js";
+const FLATPICKR_CSS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const COLOR = { spend: "#4f9dff", income: "#2bb67a", muted: "#8b97a4", line: "#2d3742", text: "#e6edf3" };
+const COLOR = {}; // chart colors, read from the Day/Night theme's CSS tokens on each render
 const TABLE_LIMIT = 300;
+const RANGES = [["1m", "1M"], ["1y", "1Y"], ["max", "Max"]];
+const EMPTY = { "1m": "No entries in the last 30 days.", "1y": "No entries in the past year.", max: "No entries in this view yet." };
 
 const view = {
   rows: [],
   currency: "EGP",
   filters: { search: "", categories: new Set(), who: new Set(), payments: new Set(), from: "", to: "" },
   sort: { key: "iso", dir: "desc" },
+  range: "max", // the trend chart's window; kept while the app is open
 };
 let trendChart = null;
 let categoryChart = null;
+let picker = null; // the date-range calendar, created the first time Dates is opened
 let built = false;
 
 const $ = (id) => document.getElementById(id);
@@ -81,21 +87,18 @@ function build() {
         el("div", { class: "ms-wrap", id: "d-ms-cat" }),
         el("div", { class: "ms-wrap", id: "d-ms-who" }),
         el("div", { class: "ms-wrap", id: "d-ms-pay" }),
-        el("label", { class: "dr" }, "From", el("input", {
-          type: "date", id: "d-from", onchange: (e) => { view.filters.from = e.target.value; renderAll(); },
-        })),
-        el("label", { class: "dr" }, "To", el("input", {
-          type: "date", id: "d-to", onchange: (e) => { view.filters.to = e.target.value; renderAll(); },
-        })),
-        el("button", { type: "button", class: "btn secondary small", text: "Clear", onclick: clearFilters }),
-        el("span", { id: "d-count", class: "count" }))),
+        dateFilter(),
+        el("button", { type: "button", class: "btn secondary small", text: "Clear", onclick: clearFilters }))),
     el("div", { class: "kpis" },
       kpi("Total spend", "d-kpi-spend", "spend"),
       kpi("Total income", "d-kpi-income", "income"),
       kpi("Net", "d-kpi-net", "net")),
     el("div", { class: "chart-grid" },
-      el("div", { class: "card" }, el("h3", { text: "Spend vs. income, by month" }),
-        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Monthly spend and income chart", role: "img" }))),
+      el("div", { class: "card" },
+        el("div", { class: "card-head" },
+          el("h3", { text: "Spend vs. income" }),
+          el("div", { id: "d-range", class: "seg small", role: "group", "aria-label": "Chart range" })),
+        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Spend and income chart", role: "img" }))),
       el("div", { class: "card" }, el("h3", { text: "Spend by category" }),
         el("div", { class: "chart-box", id: "d-cat-box" }, el("canvas", { id: "d-cat", "aria-label": "Spend by category chart", role: "img" })))),
     el("div", { class: "table-card" },
@@ -103,8 +106,12 @@ function build() {
       el("p", { id: "d-table-note", class: "table-note", hidden: true }))
   );
   renderCurrencySeg();
+  renderRangeSeg();
+  paintDates();
   buildTableHead();
   document.addEventListener("click", () => closeMenus());
+  // Charts draw with the theme's colors, so redraw them if Auto flips Day/Night while they're on screen.
+  window.addEventListener("themechange", () => { if (!$("screen-dashboard").hidden) renderAll(); });
 }
 
 function kpi(label, id, kind) {
@@ -119,13 +126,86 @@ function renderCurrencySeg() {
     })));
 }
 
+function renderRangeSeg() {
+  $("d-range").replaceChildren(...RANGES.map(([key, label]) =>
+    el("button", {
+      type: "button", class: view.range === key ? "active" : "", "aria-pressed": String(view.range === key), text: label,
+      onclick: () => { view.range = key; renderRangeSeg(); renderTrend(filteredExpenses(), filteredIncome()); },
+    })));
+}
+
 function clearFilters() {
   const f = view.filters;
-  f.search = ""; f.from = ""; f.to = "";
+  f.search = "";
   f.categories.clear(); f.who.clear(); f.payments.clear();
-  $("d-search").value = ""; $("d-from").value = ""; $("d-to").value = "";
+  $("d-search").value = "";
+  clearDates();
   buildFilterMenus();
   renderAll();
+}
+
+// ---------- date range: one button, a calendar where you tap a start day then an end day ----------
+
+function dateFilter() {
+  return el("div", { class: "ms-wrap", id: "d-dates" },
+    el("button", { type: "button", class: "ms-btn", id: "d-dates-btn", "aria-haspopup": "true", onclick: toggleDates }),
+    el("div", { class: "ms-drop date-drop", id: "d-dates-drop", hidden: true, onclick: (e) => e.stopPropagation() },
+      el("div", { id: "d-cal" }),
+      el("div", { class: "date-foot" },
+        el("span", { text: "Tap a start day, then an end day." }),
+        el("button", { type: "button", class: "link-btn", text: "Clear", onclick: () => { clearDates(); renderAll(); } }))));
+}
+
+async function toggleDates(e) {
+  e.stopPropagation();
+  const drop = $("d-dates-drop");
+  const opening = drop.hidden;
+  closeMenus();
+  if (!opening) return;
+  try {
+    loadStyle(FLATPICKR_CSS);
+    await loadScript(FLATPICKR_JS);
+  } catch (err) {
+    toast(friendlyError(err));
+    return;
+  }
+  if (!picker) {
+    picker = window.flatpickr($("d-cal"), {
+      inline: true, mode: "range", disableMobile: true, // disableMobile: iPhone's own picker can't do ranges
+      onChange: (dates) => {
+        // One day picked = the start of the range; the second pick completes it.
+        const [from = "", to = ""] = dates.map((d) => isoLocal(d));
+        Object.assign(view.filters, { from, to });
+        paintDates();
+        renderAll();
+        if (dates.length === 2) closeMenus();
+      },
+    });
+  }
+  drop.hidden = false;
+  // Keep the calendar on screen when the button sits near the right edge.
+  drop.style.left = "0px";
+  const over = drop.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
+  if (over > 0) drop.style.left = `${-over}px`;
+}
+
+function clearDates() {
+  Object.assign(view.filters, { from: "", to: "" });
+  picker?.clear(false);
+  paintDates();
+}
+
+function paintDates() {
+  const { from, to } = view.filters;
+  const button = $("d-dates-btn");
+  button.textContent = from && to ? `${shortDate(from)} – ${shortDate(to)}` : from ? `From ${shortDate(from)}` : "Dates";
+  button.classList.toggle("active", Boolean(from));
+}
+
+// "1 Aug", or "1 Aug 2025" outside the current year.
+function shortDate(iso) {
+  const d = parseISODate(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === new Date().getFullYear() ? "" : ` ${d.getFullYear()}`}`;
 }
 
 // ---------- multi-select filter menus ----------
@@ -213,31 +293,34 @@ function filteredIncome() {
 
 function renderAll() {
   if (!window.Chart) return;
+  const css = getComputedStyle(document.documentElement);
+  const token = (name) => css.getPropertyValue(name).trim();
+  Object.assign(COLOR, { spend: token("--accent"), income: token("--income"), muted: token("--muted"), line: token("--line"), text: token("--text") });
   const expenses = filteredExpenses();
   const income = filteredIncome();
   renderKpis(expenses, income);
   renderTrend(expenses, income);
   renderCategories(expenses);
   renderTable(expenses);
-  $("d-count").textContent = `${expenses.length} expense${expenses.length === 1 ? "" : "s"} · ${income.length} income`;
 }
 
 function renderKpis(expenses, income) {
   const spend = expenses.reduce((s, r) => s + amount(r), 0);
   const inc = income.reduce((s, r) => s + amount(r), 0);
   const net = inc - spend;
-  $("d-kpi-spend").textContent = money(spend);
-  $("d-kpi-income").textContent = money(inc);
+  const total = (n) => fmtMoney(n, view.currency, { decimals: 0, code: true }); // "USD 1,062", not "$1,062"
+  $("d-kpi-spend").textContent = total(spend);
+  $("d-kpi-income").textContent = total(inc);
   const netEl = $("d-kpi-net");
-  netEl.textContent = (net > 0 ? "+" : "") + money(net);
+  netEl.textContent = (net > 0 ? "+" : "") + total(net);
   netEl.className = "num " + (net >= 0 ? "pos" : "neg");
 }
 
-// Axis labels stay short ("E£12k", "$1.5k"); tooltips and KPIs show full figures.
+// Axis labels stay short ("EGP 12k", "USD 1.5k"); tooltips and KPIs show full figures.
 function compact(v) {
   const a = Math.abs(v);
   const s = a >= 1e6 ? `${+(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${+(a / 1e3).toFixed(1)}k` : String(Math.round(a));
-  return (v < 0 ? "−" : "") + (view.currency === "USD" ? "$" : "E£") + s;
+  return `${v < 0 ? "−" : ""}${view.currency} ${s}`;
 }
 
 function axisOptions() {
@@ -257,41 +340,119 @@ function emptyChart(boxId, canvasId, message) {
   return $(canvasId);
 }
 
-function renderTrend(expenses, income) {
-  const months = new Map();
-  const bucket = (iso) => {
-    const key = iso.slice(0, 7);
-    if (!months.has(key)) {
-      const [y, m] = key.split("-").map(Number);
-      months.set(key, { label: `${MONTHS[m - 1]} ${y}`, spend: 0, income: 0 });
-    }
-    return months.get(key);
-  };
-  expenses.forEach((r) => { bucket(r.iso).spend += amount(r); });
-  income.forEach((r) => { bucket(r.iso).income += amount(r); });
-  const keys = [...months.keys()].sort();
+// ---------- spend vs. income over time ----------
 
+// Every day (1M, 1Y) or month (Max) gets a point, zero when nothing was logged, so points are
+// evenly spaced in time. The date filter narrows the window further.
+function trendSeries(expenses, income) {
+  const all = expenses.concat(income);
+  let keys, keyOf;
+  if (view.range === "max") {
+    if (!all.length) return null;
+    const isos = all.map((r) => r.iso).sort();
+    keys = monthsBetween(isos[0].slice(0, 7), isos.at(-1).slice(0, 7));
+    keyOf = (r) => r.iso.slice(0, 7);
+  } else {
+    const start = new Date();
+    if (view.range === "1m") start.setDate(start.getDate() - 29);
+    else { start.setFullYear(start.getFullYear() - 1); start.setDate(start.getDate() + 1); }
+    const { from, to } = view.filters;
+    const first = [isoLocal(start), from].sort().at(-1);
+    const last = to && to < isoLocal() ? to : isoLocal();
+    if (first > last || !all.some((r) => r.iso >= first && r.iso <= last)) return null;
+    keys = daysBetween(first, last);
+    keyOf = (r) => r.iso;
+  }
+  const index = new Map(keys.map((k, i) => [k, i]));
+  const spend = keys.map(() => 0);
+  const inc = keys.map(() => 0);
+  expenses.forEach((r) => { const i = index.get(keyOf(r)); if (i !== undefined) spend[i] += amount(r); });
+  income.forEach((r) => { const i = index.get(keyOf(r)); if (i !== undefined) inc[i] += amount(r); });
+  return { keys, spend, income: inc, daily: view.range !== "max" };
+}
+
+function daysBetween(first, last) {
+  const out = [];
+  for (const d = parseISODate(first); isoLocal(d) <= last; d.setDate(d.getDate() + 1)) out.push(isoLocal(d));
+  return out;
+}
+
+function monthsBetween(first, last) {
+  const out = [];
+  for (let [y, m] = first.split("-").map(Number); ; m === 12 ? (y++, m = 1) : m++) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    out.push(key);
+    if (key >= last) return out;
+  }
+}
+
+// Axis labels. Up to ~2 months of days: a grid line every day, a date every few days.
+// Longer runs of days: a line and label at each month. Months: each month, or each year past 2 years.
+// When months are too tight to all be labeled, labels fall on Jan, Mar, May… (or Jan, Apr, Jul…),
+// so January, shown as the year, always gets one.
+// Returning null hides a tick and its grid line; "" keeps the line without a label.
+function tickFor({ keys, daily }) {
+  const monthName = (m, y) => (m === 1 ? String(y) : MONTHS[m - 1]);
+  const every = (count, width, px) => Math.max(1, Math.ceil(px / (width / count)));
+  const monthLabel = (key, step) => {
+    const [y, m] = key.split("-").map(Number);
+    return (m - 1) % (step > 6 ? 12 : step > 4 ? 6 : step) ? "" : monthName(m, y);
+  };
+  if (daily && keys.length <= 62) {
+    return (i, width) => {
+      if ((keys.length - 1 - i) % every(keys.length, width, 44)) return "";
+      const d = parseISODate(keys[i]);
+      return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+    };
+  }
+  if (daily) {
+    const starts = keys.map((k, i) => (k.endsWith("-01") ? i : -1)).filter((i) => i >= 0);
+    return (i, width) => (starts.includes(i) ? monthLabel(keys[i], every(starts.length, width, 34)) : null);
+  }
+  if (keys.length > 24) return (i) => (keys[i].endsWith("-01") ? keys[i].slice(0, 4) : null);
+  return (i, width) => monthLabel(keys[i], every(keys.length, width, 34));
+}
+
+function periodTitle(key) {
+  if (key.length === 7) return `${MONTHS[Number(key.slice(5)) - 1]} ${key.slice(0, 4)}`;
+  return parseISODate(key).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+
+function renderTrend(expenses, income) {
+  const s = trendSeries(expenses, income);
   trendChart?.destroy();
   trendChart = null;
-  const canvas = emptyChart("d-trend-box", "d-trend", keys.length ? "" : "No entries in this view yet.");
+  const canvas = emptyChart("d-trend-box", "d-trend", s ? "" : EMPTY[view.range]);
   if (!canvas) return;
+
+  const tick = tickFor(s);
+  const n = s.keys.length;
+  const line = (label, data, color) => ({
+    label, data: data.map(Math.round), borderColor: color, backgroundColor: color + "26", fill: true,
+    cubicInterpolationMode: "monotone", // no dips below zero between points
+    pointRadius: n > 45 ? 0 : n > 12 ? 2 : 3, pointHoverRadius: 4, borderWidth: n > 100 ? 1.5 : 2,
+  });
+  const scales = axisOptions();
   trendChart = new window.Chart(canvas, {
     type: "line",
-    data: {
-      labels: keys.map((k) => months.get(k).label),
-      datasets: [
-        { label: "Income", data: keys.map((k) => Math.round(months.get(k).income)), borderColor: COLOR.income, backgroundColor: COLOR.income + "26", fill: true, tension: 0.3, pointRadius: 3, borderWidth: 2 },
-        { label: "Spend", data: keys.map((k) => Math.round(months.get(k).spend)), borderColor: COLOR.spend, backgroundColor: COLOR.spend + "26", fill: true, tension: 0.3, pointRadius: 3, borderWidth: 2 },
-      ],
-    },
+    data: { labels: s.keys, datasets: [line("Income", s.income, COLOR.income), line("Spend", s.spend, COLOR.spend)] },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: COLOR.text, boxWidth: 10, boxHeight: 10 } },
-        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${money(c.parsed.y)}` } },
+        tooltip: { callbacks: { title: (items) => periodTitle(s.keys[items[0].dataIndex]), label: (c) => `${c.dataset.label}: ${money(c.parsed.y)}` } },
       },
-      scales: axisOptions(),
+      scales: {
+        x: {
+          grid: { color: COLOR.line },
+          ticks: {
+            color: COLOR.muted, maxRotation: 0, autoSkip: false,
+            callback(value, i) { return tick(i, this.width || this.chart.width); },
+          },
+        },
+        y: scales.y,
+      },
     },
   });
 }
@@ -316,7 +477,7 @@ function renderCategories(expenses) {
       indexAxis: "y", responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => money(c.parsed.x) } } },
       scales: {
-        x: { ...scales.y, ticks: { ...scales.y.ticks, maxTicksLimit: 5, maxRotation: 0 } },
+        x: { ...scales.y, ticks: { ...scales.y.ticks, maxTicksLimit: 4, maxRotation: 0 } }, // 4 fit "USD 600"-wide labels on a phone
         y: { ticks: { color: COLOR.text }, grid: { display: false } },
       },
     },
@@ -366,7 +527,7 @@ function renderTable(expenses) {
         el("td", { text: r.category }),
         el("td", { text: r.subcategory }),
         el("td", { text: r.description }),
-        el("td", { class: "amt", text: fmtMoney(amount(r), view.currency) }),
+        el("td", { class: "amt", text: fmtMoney(amount(r), view.currency, { code: true }) }),
         el("td", { text: r.whoName }),
         el("td", { text: r.payment }))));
   }
