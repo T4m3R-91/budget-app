@@ -2,16 +2,17 @@
 
 import { configured, sb, reloadLists } from "./db.js";
 import { state } from "./state.js";
-import { el, friendlyError } from "./ui.js";
+import { el, friendlyError, applyTheme } from "./ui.js";
 import { showAdd, showEdit } from "./entry.js";
 import { showHistory } from "./history.js";
 import { showDashboard } from "./dashboard.js";
 import { showSettings } from "./settings.js";
+import { showProfile } from "./profile.js";
 
 window.__appStarted = true;
 
 const $ = (id) => document.getElementById(id);
-const TABS = { add: showAdd, history: showHistory, dashboard: showDashboard, settings: showSettings };
+const TABS = { add: showAdd, history: showHistory, dashboard: showDashboard, settings: showSettings, profile: showProfile };
 const SCREENS = ["boot", "setup", "login", "notmember", ...Object.keys(TABS)];
 
 function showScreen(name, activeTab = name) {
@@ -111,6 +112,10 @@ function syncOnline() {
 }
 
 async function boot() {
+  // Auto theme: re-check the clock every minute and whenever the app comes back to the front.
+  applyTheme();
+  setInterval(applyTheme, 60_000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) applyTheme(); });
   syncOnline();
   window.addEventListener("online", syncOnline);
   window.addEventListener("offline", syncOnline);

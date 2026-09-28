@@ -19,11 +19,13 @@ export function el(tag, props, ...children) {
   return node;
 }
 
-export function fmtMoney(n, currency, { decimals } = {}) {
+// "EGP 1,450" / "$15.99"; with { code: true } USD is spelled out too: "USD 15.99".
+export function fmtMoney(n, currency, { decimals, code = false } = {}) {
   const v = Number(n) || 0;
   const d = decimals ?? (Math.abs(v % 1) > 0.004 ? 2 : 0);
   const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-  return (v < 0 ? "−" : "") + (currency === "USD" ? "$" + s : "EGP " + s);
+  const unit = currency === "USD" ? (code ? "USD " : "$") : "EGP ";
+  return (v < 0 ? "−" : "") + unit + s;
 }
 
 export const fmtRate = (r) => Number(r).toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -83,6 +85,47 @@ export function friendlyError(e) {
   return msg || "Something went wrong. Please try again.";
 }
 
+// ---------- time of day ----------
+
+// By the phone's clock: morning 5–11, afternoon 12–16, evening 17–21, night 22–4.
+// Drives the Add screen's greeting and the Auto theme (Day in the morning and afternoon).
+// index.html repeats the Day hours (5–16) to set the theme before the first paint.
+export function partOfDay(hour = new Date().getHours()) {
+  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 12 && hour < 17) return "afternoon";
+  if (hour >= 17 && hour < 22) return "evening";
+  return "night";
+}
+
+// ---------- Auto / Day / Night theme (the choice is saved on this device; Auto until one is picked) ----------
+
+const THEME_KEY = "theme";
+let themeChoice_ = (() => {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved === "light" || saved === "dark" ? saved : "auto";
+  } catch { return "auto"; }
+})();
+
+export const themeChoice = () => themeChoice_; // "dark" | "light" | "auto"
+
+export function setThemeChoice(choice) {
+  themeChoice_ = choice;
+  try { localStorage.setItem(THEME_KEY, choice); } catch { /* private mode: applies until the app closes */ }
+  applyTheme();
+}
+
+// Puts the chosen theme (or Auto's pick for this hour) on <html>, and tells the charts if it changed.
+export function applyTheme() {
+  const day = ["morning", "afternoon"].includes(partOfDay());
+  const theme = themeChoice_ === "auto" ? (day ? "light" : "dark") : themeChoice_;
+  const root = document.documentElement;
+  if ((root.dataset.theme === "light" ? "light" : "dark") === theme) return;
+  root.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "light" ? "#f4f6f8" : "#0f1419");
+  window.dispatchEvent(new Event("themechange"));
+}
+
 // ---------- lazy-loaded libraries ----------
 
 const scripts = new Map();
@@ -100,4 +143,11 @@ export function loadScript(src) {
     }));
   }
   return scripts.get(src);
+}
+
+// Goes in before styles.css, so the app's own look wins over a library's defaults.
+export function loadStyle(href) {
+  if (document.querySelector(`link[href="${href}"]`)) return;
+  const link = el("link", { rel: "stylesheet", href });
+  document.head.insertBefore(link, document.querySelector('link[href="styles.css"]'));
 }

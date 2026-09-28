@@ -2,7 +2,7 @@
 // is defaulted (date today, EGP, you, last payment method, live rate) and editable.
 
 import { state, byId, subcategoriesOf } from "./state.js";
-import { el, toast, fmtMoney, fmtRate, isoLocal, friendlyDate, relativeDay, friendlyError } from "./ui.js";
+import { el, toast, fmtMoney, fmtRate, isoLocal, friendlyDate, relativeDay, friendlyError, partOfDay } from "./ui.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate } from "./fx.js";
 import { insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction } from "./db.js";
@@ -111,6 +111,8 @@ async function ensureRate({ force = false } = {}) {
 
 // ---------- rendering ----------
 
+const GREETING = { morning: "Good morning", afternoon: "Good afternoon", evening: "Good evening", night: "Good night" };
+
 function render() {
   const r = screen();
   const income = f.type === "income";
@@ -124,6 +126,9 @@ function render() {
           el("h2", { text: income ? "Edit income" : "Edit expense" }),
           el("span"))
       : el("div", { class: "entry-head centered" }, typeSeg());
+  const greeting = f.mode === "add"
+    ? el("div", { class: "greeting" }, el("p", { text: GREETING[partOfDay()] }), el("h2", { text: state.me.display_name }))
+    : null;
 
   // The amount box shows the result of the currency row above it: unit beside the number,
   // and the converted value underneath.
@@ -155,7 +160,8 @@ function render() {
         el("button", { id: "e-delete", type: "button", class: "btn danger", text: "Delete", onclick: onDelete }), save)
     : el("div", { class: "actions" }, save);
 
-  r.replaceChildren(
+  r.replaceChildren(...[
+    greeting,
     head,
     el("div", { class: "cur-row" },
       el("div", { id: "e-cur-seg", class: "seg small", role: "group", "aria-label": "Currency" }),
@@ -170,8 +176,8 @@ function render() {
       "aria-label": "Note", value: f.description,
       oninput: (e) => { f.description = e.target.value; },
     }),
-    el("div", { class: "action-bar" }, actions)
-  );
+    el("div", { class: "action-bar" }, actions),
+  ].filter(Boolean));
 
   renderCurrency();
   renderRate();
@@ -456,7 +462,7 @@ async function save_() {
     }
     // Points are scored by the database; `points` is absent until points-migration.sql has run.
     const earned = Number.isInteger(saved.points) ? saved.points : null;
-    toast(`Saved ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency)}${earned ? ` · +${earned} pts` : ""}`, {
+    toast(`Saved ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency, { code: true })}${earned ? ` · +${earned} pts` : ""}`, {
       label: "Undo",
       run: () => undo(saved.id, earned),
     });
