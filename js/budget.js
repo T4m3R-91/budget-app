@@ -37,12 +37,14 @@ const isMissing = (e) => ["42P01", "PGRST205", "PGRST202"].includes(e?.code);
 
 // ---------- Add screen: the month's budget and spending so far ----------
 
-// { month, budget, spent } (Maps of categoryId → EGP), or null when the month has no budget or
-// budgets can't be reached (not set up yet, or offline); the tiles then just stay plain.
+// { month, budget, spent, spentUsd } (Maps of categoryId → EGP, or USD for spentUsd, each entry at
+// its saved value), or null when the month has no budget or budgets can't be reached (not set up
+// yet, or offline); the tiles then just stay plain.
 export async function monthStatus(month) {
   try {
     const [rows, spend] = await Promise.all([fetchBudget(month), fetchExpensesBetween(month, shiftMonth(month, 1))]);
-    return rows.length ? { month, budget: toMap(rows), spent: spentBy(spend) } : null;
+    const spentUsd = spentBy(spend.map((r) => ({ category_id: r.category_id, amount_egp: r.amount_usd })));
+    return rows.length ? { month, budget: toMap(rows), spent: spentBy(spend), spentUsd } : null;
   } catch {
     return null;
   }
@@ -160,11 +162,12 @@ function cardBody(month, now, data) {
   const used = { egp: sum(lines, "egp"), usd: sum(lines, "usd") };
   const unbudgeted = [...spent].filter(([id]) => !budget.has(id)).map(([, s]) => s);
   const inUsd = state.displayCurrency === "USD";
-  const usd = (n) => fmtMoney(n, "USD", { decimals: 0, code: true });
+  // USD equivalents are marked ≈, as in History.
+  const usd = (n) => `≈ ${fmtMoney(n, "USD", { decimals: 0, code: true })}`;
 
   // One format for the overall line and every category.
   // EGP: "EGP 10,620 / 15,000 · 70%", or "EGP 156,988 / 100,000 · EGP 56,988 over".
-  // USD: the limits are EGP, so only "70%", or the overflow in USD: "USD 1,120 over". The
+  // USD: the limits are EGP, so only "70%", or the overflow in USD: "≈ USD 1,120 over". The
   // overflow is that share of the spending's saved USD value, so it doesn't drift with the rate.
   const figures = (sp, bu) => {
     const over = sp.egp > bu;
