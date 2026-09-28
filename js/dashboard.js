@@ -22,7 +22,6 @@ const view = {
   range: "max", // the trend chart's window; kept while the app is open
 };
 let trendChart = null;
-let categoryChart = null;
 let picker = null; // the date-range calendar, created the first time Dates is opened
 let built = false;
 
@@ -68,7 +67,7 @@ function enrich(t) {
 }
 
 const amount = (r) => r[view.currency];
-const money = (n) => fmtMoney(n, view.currency, { decimals: 0 });
+const money = (n) => fmtMoney(n, view.currency, { decimals: 0, code: true }); // "USD 1,062", not "$1,062"
 
 // ---------- layout ----------
 
@@ -96,11 +95,12 @@ function build() {
     el("div", { class: "chart-grid" },
       el("div", { class: "card" },
         el("div", { class: "card-head" },
-          el("h3", { text: "Spend vs. income" }),
+          el("h3", { text: "Cash flow" }),
           el("div", { id: "d-range", class: "seg small", role: "group", "aria-label": "Chart range" })),
-        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Spend and income chart", role: "img" }))),
+        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Cash flow chart: income, spend and cumulative net", role: "img" }))),
       el("div", { class: "card" }, el("h3", { text: "Spend by category" }),
-        el("div", { class: "chart-box", id: "d-cat-box" }, el("canvas", { id: "d-cat", "aria-label": "Spend by category chart", role: "img" })))),
+        el("div", { class: "treemap", id: "d-cat-box", role: "group", "aria-label": "Spend by category" }),
+        el("p", { id: "d-cat-detail", class: "tm-detail", "aria-live": "polite" }))),
     el("div", { class: "table-card" },
       el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, el("tr", { id: "d-thead" })), el("tbody", { id: "d-tbody" }))),
       el("p", { id: "d-table-note", class: "table-note", hidden: true }))
@@ -112,6 +112,8 @@ function build() {
   document.addEventListener("click", () => closeMenus());
   // Charts draw with the theme's colors, so redraw them if Auto flips Day/Night while they're on screen.
   window.addEventListener("themechange", () => { if (!$("screen-dashboard").hidden) renderAll(); });
+  // Treemap tiles are laid out for the box's size: lay them out again when it changes.
+  new ResizeObserver(() => paintTreemap()).observe($("d-cat-box"));
 }
 
 function kpi(label, id, kind) {
@@ -308,11 +310,10 @@ function renderKpis(expenses, income) {
   const spend = expenses.reduce((s, r) => s + amount(r), 0);
   const inc = income.reduce((s, r) => s + amount(r), 0);
   const net = inc - spend;
-  const total = (n) => fmtMoney(n, view.currency, { decimals: 0, code: true }); // "USD 1,062", not "$1,062"
-  $("d-kpi-spend").textContent = total(spend);
-  $("d-kpi-income").textContent = total(inc);
+  $("d-kpi-spend").textContent = money(spend);
+  $("d-kpi-income").textContent = money(inc);
   const netEl = $("d-kpi-net");
-  netEl.textContent = (net > 0 ? "+" : "") + total(net);
+  netEl.textContent = (net > 0 ? "+" : "") + money(net);
   netEl.className = "num " + (net >= 0 ? "pos" : "neg");
 }
 
@@ -340,7 +341,7 @@ function emptyChart(boxId, canvasId, message) {
   return $(canvasId);
 }
 
-// ---------- spend vs. income over time ----------
+// ---------- cash flow over time ----------
 
 // Every day (1M, 1Y) or month (Max) gets a point, zero when nothing was logged, so points are
 // evenly spaced in time. The date filter narrows the window further.
@@ -425,63 +426,169 @@ function renderTrend(expenses, income) {
   const canvas = emptyChart("d-trend-box", "d-trend", s ? "" : EMPTY[view.range]);
   if (!canvas) return;
 
+  // Cash flow: income as bars up, spend as bars down (one pair per day or month), and a line
+  // for the cumulative net since the start of the range. The line is the net of what's logged,
+  // not a bank balance.
   const tick = tickFor(s);
   const n = s.keys.length;
-  const line = (label, data, color) => ({
-    label, data: data.map(Math.round), borderColor: color, backgroundColor: color + "26", fill: true,
-    cubicInterpolationMode: "monotone", // no dips below zero between points
-    pointRadius: n > 45 ? 0 : n > 12 ? 2 : 3, pointHoverRadius: 4, borderWidth: n > 100 ? 1.5 : 2,
+  const inflow = s.income.map(Math.round);
+  const outflow = s.spend.map(Math.round);
+  let running = 0;
+  const cumulative = inflow.map((v, i) => (running += v - outflow[i]));
+  const signed = (v) => (v > 0 ? "+" : "") + money(v);
+  const bars = (label, data, color) => ({
+    type: "bar", label, data, backgroundColor: color, order: 1,
+    barPercentage: n > 60 ? 1 : 0.8, categoryPercentage: n > 60 ? 1 : 0.8, borderRadius: n > 60 ? 0 : 3,
   });
   const scales = axisOptions();
   trendChart = new window.Chart(canvas, {
-    type: "line",
-    data: { labels: s.keys, datasets: [line("Income", s.income, COLOR.income), line("Spend", s.spend, COLOR.spend)] },
+    type: "bar",
+    data: {
+      labels: s.keys,
+      datasets: [
+        {
+          type: "line", label: "Cumulative net", data: cumulative, order: 0, // drawn over the bars
+          borderColor: COLOR.text, backgroundColor: COLOR.text, borderWidth: n > 100 ? 1.5 : 2, tension: 0,
+          pointRadius: n > 12 ? 0 : 3, pointHoverRadius: 4, // dots only for a few months; tapping shows the rest
+        },
+        bars("Income", inflow, COLOR.income),
+        bars("Spend", outflow.map((v) => -v), COLOR.spend),
+      ],
+    },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: COLOR.text, boxWidth: 10, boxHeight: 10 } },
-        tooltip: { callbacks: { title: (items) => periodTitle(s.keys[items[0].dataIndex]), label: (c) => `${c.dataset.label}: ${money(c.parsed.y)}` } },
+        tooltip: {
+          callbacks: {
+            title: (items) => periodTitle(s.keys[items[0].dataIndex]),
+            label: (c) => (c.dataset.type === "line"
+              ? `${c.dataset.label}: ${signed(c.parsed.y)}`
+              : `${c.dataset.label}: ${money(Math.abs(c.parsed.y))}`),
+            // Max (one point per month) also shows that month's own net; days don't need it.
+            footer: (items) => { const i = items[0].dataIndex; return s.daily ? [] : `Net this month: ${signed(inflow[i] - outflow[i])}`; },
+          },
+        },
       },
       scales: {
         x: {
+          stacked: true, // income and spend share one slot: one up, one down
           grid: { color: COLOR.line },
           ticks: {
             color: COLOR.muted, maxRotation: 0, autoSkip: false,
             callback(value, i) { return tick(i, this.width || this.chart.width); },
           },
         },
-        y: scales.y,
+        y: {
+          ...scales.y, stacked: true,
+          grid: { color: (c) => (c.tick?.value === 0 ? COLOR.muted : COLOR.line) }, // a firmer zero line
+        },
       },
     },
   });
 }
 
-function renderCategories(expenses) {
-  const sums = new Map();
-  expenses.forEach((r) => sums.set(r.category, (sums.get(r.category) || 0) + amount(r)));
-  const entries = [...sums].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+// ---------- spend by category: a treemap of the top 4 categories plus "Other" ----------
 
-  categoryChart?.destroy();
-  categoryChart = null;
-  const canvas = emptyChart("d-cat-box", "d-cat", entries.length ? "" : "No spending in this view yet.");
-  if (!canvas) return;
-  const scales = axisOptions();
-  categoryChart = new window.Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: entries.map((e) => e[0]),
-      datasets: [{ data: entries.map((e) => Math.round(e[1])), backgroundColor: COLOR.spend, borderRadius: 4, maxBarThickness: 22 }],
+// Tile areas are shares of spend. Each tile shows as much as fits (name, amount, %); tapping
+// one spells out its figures underneath, and "Other" lists what it groups.
+function renderCategories(expenses) {
+  const byCategory = new Map();
+  for (const r of expenses) {
+    const t = byCategory.get(r.categoryId) ||
+      { key: r.categoryId, name: r.category, icon: byId(state.categories, r.categoryId)?.icon || "📦", amount: 0 };
+    t.amount += amount(r);
+    byCategory.set(r.categoryId, t);
+  }
+  const all = [...byCategory.values()].filter((t) => t.amount > 0).sort((a, b) => b.amount - a.amount);
+  const rest = all.slice(4);
+  const tiles = all.length > 5
+    ? [...all.slice(0, 4), { key: "other", name: "Other", icon: "", amount: rest.reduce((s, t) => s + t.amount, 0), parts: rest }]
+    : all;
+  treemap.ready = true;
+  treemap.tiles = tiles;
+  treemap.total = all.reduce((s, t) => s + t.amount, 0);
+  if (!tiles.some((t) => t.key === treemap.picked)) treemap.picked = null;
+  paintTreemap();
+}
+
+const treemap = { ready: false, tiles: [], total: 0, picked: null };
+
+function paintTreemap() {
+  if (!treemap.ready) return; // data still loading
+  const box = $("d-cat-box");
+  const { tiles, total } = treemap;
+  if (!tiles.length) {
+    box.replaceChildren(el("div", { class: "chart-empty", text: "No spending in this view yet." }));
+    $("d-cat-detail").replaceChildren();
+    return;
+  }
+  const W = box.clientWidth, H = box.clientHeight;
+  if (!W || !H) return; // hidden; the size observer paints once it's on screen
+  const rects = squarify(tiles.map((t) => t.amount), W, H);
+  const mixes = ["58%", "44%", "34%", "26%", "18%"]; // bigger share, stronger blue
+  box.replaceChildren(...tiles.map((t, i) => {
+    const { x, y, w, h } = rects[i];
+    // What fits (lines are ~16px, padding 18px across / 18px down): name + amount + %, name + %,
+    // icon + %, just %, or nothing (tapping still works).
+    const amountWidth = money(t.amount).length * 7 + 18;
+    const fit = w >= Math.max(80, amountWidth) && h >= 66 ? "full" : w >= 72 && h >= 50 ? "mid"
+      : w >= 30 && h >= 44 && t.icon ? "icon" : w >= 30 && h >= 22 ? "pct" : "none";
+    return el("button", {
+      type: "button", class: `tm-tile fit-${fit}${treemap.picked === t.key ? " picked" : ""}`,
+      style: `left:${(x / W) * 100}%;top:${(y / H) * 100}%;width:${(w / W) * 100}%;height:${(h / H) * 100}%;--mix:${t.parts ? "12%" : mixes[i]}`,
+      title: tileSummary(t), "aria-label": tileSummary(t),
+      onclick: () => { treemap.picked = treemap.picked === t.key ? null : t.key; paintTreemap(); },
     },
-    options: {
-      indexAxis: "y", responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => money(c.parsed.x) } } },
-      scales: {
-        x: { ...scales.y, ticks: { ...scales.y.ticks, maxTicksLimit: 4, maxRotation: 0 } }, // 4 fit "USD 600"-wide labels on a phone
-        y: { ticks: { color: COLOR.text }, grid: { display: false } },
-      },
-    },
-  });
+      el("span", { class: "tm-ico", "aria-hidden": "true", text: t.icon }),
+      el("span", { class: "tm-name", text: `${t.icon} ${t.name}`.trim() }),
+      el("span", { class: "tm-amt", text: money(t.amount) }),
+      el("span", { class: "tm-pct", text: share(t.amount, total) }));
+  }));
+
+  const picked = tiles.find((t) => t.key === treemap.picked);
+  $("d-cat-detail").replaceChildren(picked
+    ? el("span", {}, el("strong", { text: tileSummary(picked) }),
+        picked.parts ? `: ${picked.parts.map((p) => `${p.icon} ${p.name} ${money(p.amount)} (${share(p.amount, total)})`).join(" · ")}` : "")
+    : el("span", { class: "muted", text: "Tap a tile for its figures." }));
+}
+
+const share = (part, total) => { const p = (part / total) * 100; return p > 0 && p < 1 ? "<1%" : `${Math.round(p)}%`; };
+const tileSummary = (t) => `${`${t.icon} ${t.name}`.trim()} · ${money(t.amount)} · ${share(t.amount, treemap.total)}`;
+
+// Squarified treemap (Bruls, Huizing & van Wijk): fills the box row by row, adding a tile to
+// the current row only while that keeps the row's tiles closer to square.
+function squarify(values, W, H) {
+  const sum = (list) => list.reduce((a, b) => a + b, 0);
+  const areas = values.map((v) => (v / sum(values)) * W * H);
+  const rects = [];
+  let x = 0, y = 0, w = W, h = H, row = [];
+  const worst = (list, side) => {
+    const s = sum(list);
+    return Math.max(...list.map((a) => Math.max((side * side * a) / (s * s), (s * s) / (side * side * a))));
+  };
+  const place = (list) => {
+    const s = sum(list);
+    if (w >= h) { // a column down the left
+      const cw = s / h;
+      let yy = y;
+      for (const a of list) { rects.push({ x, y: yy, w: cw, h: a / cw }); yy += a / cw; }
+      x += cw; w -= cw;
+    } else { // a row across the top
+      const rh = s / w;
+      let xx = x;
+      for (const a of list) { rects.push({ x: xx, y, w: a / rh, h: rh }); xx += a / rh; }
+      y += rh; h -= rh;
+    }
+  };
+  for (let i = 0; i < areas.length;) {
+    const side = Math.min(w, h);
+    if (!row.length || worst([...row, areas[i]], side) <= worst(row, side)) row.push(areas[i++]);
+    else { place(row); row = []; }
+  }
+  if (row.length) place(row);
+  return rects;
 }
 
 // ---------- table ----------
