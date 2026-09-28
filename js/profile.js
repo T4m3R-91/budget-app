@@ -1,8 +1,11 @@
-// Your account (password, sign-out), then your points and the household leaderboard.
+// Profile: your account (password, sign-out), your points and the household leaderboard, the
+// Settings card (collapsed until opened), and the Excel download.
 
 import { state } from "./state.js";
 import { el, toast, friendlyError } from "./ui.js";
 import { sb, fetchLeaderboard } from "./db.js";
+import { settingsCard } from "./settings.js";
+import { exportToExcel } from "./export.js";
 
 let board = { status: "loading", rows: [] }; // loading | ready | missing | error
 let period = "all_time"; // or "this_month"
@@ -11,8 +14,35 @@ export function showProfile() {
   document.getElementById("screen-profile").replaceChildren(
     el("h2", { class: "screen-title", text: "Profile" }),
     accountSection(),
-    el("section", { class: "set-section" }, el("h3", { text: "Points" }), pointsBox()));
+    el("section", { class: "set-section" }, el("h3", { text: "Points" }), pointsBox()),
+    settingsCard(),
+    downloadSection(),
+    el("p", { class: "app-version", text: "Household Budget 2.0" }));
   loadBoard();
+}
+
+// ---------- download ----------
+
+function downloadSection() {
+  const button = el("button", {
+    type: "button", class: "btn secondary full", text: "Download Excel",
+    onclick: async () => {
+      button.disabled = true;
+      button.textContent = "Preparing file…";
+      try {
+        const counts = await exportToExcel();
+        toast(`Downloaded ${counts.expenses} expenses and ${counts.income} income entries`);
+      } catch (e) {
+        toast(friendlyError(e));
+      }
+      button.disabled = false;
+      button.textContent = "Download Excel";
+    },
+  });
+  return el("section", { class: "set-section" },
+    el("h3", { text: "Download" }),
+    el("p", { class: "note", text: "Downloads everything as an Excel file with Transactions and Income tabs, in the same layout as your spreadsheet." }),
+    button);
 }
 
 // ---------- points ----------

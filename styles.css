@@ -33,9 +33,10 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   /* Tab bar: the icons row, plus a strip below it. On iPhones with a home-indicator line the
-     bar dips into that 34px strip, leaving ~20px under the labels, instead of stacking it all below. */
+     bar dips into that 34px strip, keeping only 10px of it under the icons row (the labels
+     still clear the line), instead of stacking the whole strip below. */
   --tabbar-h: 52px;
-  --tabbar-pad: max(calc(var(--safe-bottom) - 14px), 4px);
+  --tabbar-pad: max(calc(var(--safe-bottom) - 24px), 4px);
   --tabbar-total: calc(var(--tabbar-h) + var(--tabbar-pad));
 }
 :root[data-theme="light"] {
@@ -130,6 +131,7 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.small { padding: 8px 12px; font-size: 14px; border-radius: 9px; }
 .btn.full { width: 100%; }
+a.btn { display: inline-block; text-decoration: none; }
 .link-btn { background: none; border: 0; color: var(--accent); font-size: 14px; padding: 6px 4px; text-decoration: none; }
 
 .seg { display: inline-flex; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
@@ -211,6 +213,20 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 }
 .cat-btn.sel { border-color: var(--accent); background: var(--accent-soft); }
 .income-mode .cat-btn.sel { border-color: var(--income); background: var(--income-soft); }
+/* Budgeted category: a soft blue fill grows left to right to the share used (--used), fading at
+   its edge, with what's left underneath. Over budget: full and red. Comes after .sel so a picked
+   tile keeps its fill (the blue border still marks it). */
+.cat-btn.budgeted {
+  gap: 2px;
+  background: linear-gradient(to right,
+    color-mix(in srgb, var(--accent) 26%, var(--panel)) calc(var(--used) - 8%),
+    var(--panel) var(--used));
+}
+.cat-btn.budgeted.over { background: color-mix(in srgb, var(--expense) 22%, var(--panel)); }
+.cat-btn.budgeted .ico { font-size: 17px; }
+.cat-btn.budgeted .nm { -webkit-line-clamp: 1; max-width: 100%; }
+.cat-btn .left { font-size: 10.5px; line-height: 1.1; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cat-btn.over .left { color: var(--expense); font-weight: 600; }
 .empty-note { color: var(--muted); font-size: 13.5px; grid-column: 1 / -1; padding: 8px 0; }
 
 /* Subcategories hang directly off the chosen category. */
@@ -378,13 +394,54 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 }
 
 .chart-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
-@media (min-width: 1000px) { .chart-grid { grid-template-columns: 2fr 1fr; } }
+/* Wide screens: the same 3 columns and gap as the totals above, so Cash flow (2 columns) lines
+   up exactly with Total spend + Total income, and the treemap with Net. */
+@media (min-width: 1000px) {
+  .chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .chart-grid > :first-child { grid-column: span 2; }
+}
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
 .card h3 { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
 .card-head h3 { margin: 0; }
 .chart-box { position: relative; height: 300px; }
 .chart-empty { color: var(--muted); font-size: 13.5px; display: grid; place-items: center; height: 100%; }
+
+/* Budget tab: the month's card, the overall line, then a bar per budgeted category.
+   Bars are blue up to the budget; full and red once over. */
+.budget-card { margin-bottom: 14px; }
+.month-nav { display: flex; align-items: center; gap: 6px; }
+.month-nav .icon-btn { min-width: 34px; height: 32px; font-size: 18px; line-height: 1; }
+.bud-title { display: flex; align-items: baseline; gap: 8px; }
+.bud-title span { color: var(--muted); font-size: 12.5px; }
+.bud-empty { margin: 0; }
+.bud-bar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
+.bud-bar.overall { height: 10px; border-radius: 5px; }
+.bud-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.bud-bar.over span { background: var(--expense); }
+.bud-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+/* Name left, figures right; on a narrow phone long figures drop under the name instead of cutting it. */
+.bud-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; margin-bottom: 4px; font-size: 13.5px; }
+.bud-name { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bud-fig { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bud-row.over .bud-fig { color: var(--expense); font-weight: 600; }
+.bud-overall { padding-bottom: 12px; margin-bottom: 2px; border-bottom: 1px solid var(--line); }
+.bud-overall .bud-name { font-weight: 600; }
+.bud-overall .bud-fig { color: var(--text); }
+.bud-none { display: flex; justify-content: space-between; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+.bud-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* The form that sets a month's budget. */
+.bud-sub { margin: 4px 0 12px; color: var(--muted); font-size: 13px; text-align: center; }
+.bud-edit { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 14px; }
+.bud-edit-row { display: grid; grid-template-columns: 26px 1fr 128px; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid var(--line); }
+.bud-edit-row:first-child { border-top: 0; }
+.bud-edit-ico { font-size: 18px; text-align: center; }
+.bud-edit-name { display: flex; flex-direction: column; min-width: 0; font-size: 14.5px; }
+.bud-hint { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.bud-input { text-align: right; padding: 9px 10px; font-variant-numeric: tabular-nums; }
+.bud-edit-total { display: flex; justify-content: space-between; margin: 12px 4px 0; font-size: 15px; }
+.bud-edit-total strong { font-variant-numeric: tabular-nums; }
 
 /* Spend by category: treemap tiles, the spend blue blended into the card (--mix, set per tile:
    stronger for bigger shares). The 2px border in the card's color draws the gaps between tiles. */
@@ -422,6 +479,16 @@ td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
 .set-section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
 .set-section h3 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .set-section .note { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+/* Profile's Settings card: collapsed until its title row is tapped; the sections inside are
+   separated by dividers rather than drawn as cards within a card. */
+.set-section .collapse-head { margin: 0; }
+.collapse-head button {
+  display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 24px;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+.collapse-head .chev { font-size: 13px; transition: transform 0.15s ease; }
+.collapse-head button[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.settings-card .set-section { margin: 14px 0 0; padding: 14px 0 0; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 .theme-seg { display: flex; }
 .theme-seg button { flex: 1; }
 .li-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }

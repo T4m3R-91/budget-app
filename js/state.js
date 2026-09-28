@@ -8,6 +8,7 @@ export const state = {
   subcategories: [],
   paymentMethods: [],
   incomeSources: [],
+  displayCurrency: "EGP", // the Dashboard's and Budget tab's EGP/USD switch (one setting for both)
 };
 
 export const byId = (list, id) => (id ? list.find((x) => x.id === id) || null : null);

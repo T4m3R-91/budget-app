@@ -29,6 +29,8 @@ const $ = (id) => document.getElementById(id);
 
 export async function showDashboard() {
   if (!built) build();
+  view.currency = state.displayCurrency; // the EGP/USD switch is shared with the Budget tab
+  renderCurrencySeg();
   setStatus("Loading…");
   try {
     const [txns] = await Promise.all([fetchAllTransactions(), loadScript(CHART_JS)]);
@@ -124,7 +126,7 @@ function renderCurrencySeg() {
   $("d-cur").replaceChildren(...["EGP", "USD"].map((c) =>
     el("button", {
       type: "button", class: view.currency === c ? "active" : "", "aria-pressed": String(view.currency === c), text: c,
-      onclick: () => { view.currency = c; renderCurrencySeg(); renderAll(); },
+      onclick: () => { view.currency = state.displayCurrency = c; renderCurrencySeg(); renderAll(); },
     })));
 }
 
@@ -640,5 +642,5 @@ function renderTable(expenses) {
   }
   const note = $("d-table-note");
   note.hidden = sorted.length <= TABLE_LIMIT;
-  note.textContent = `Showing the first ${TABLE_LIMIT} of ${sorted.length}. Narrow the filters, or export to Excel for everything.`;
+  note.textContent = `Showing the first ${TABLE_LIMIT} of ${sorted.length}. Narrow the filters, or use Download Excel in Profile for everything.`;
 }

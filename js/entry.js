@@ -7,6 +7,7 @@ import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate } from "./fx.js";
 import { insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction } from "./db.js";
 import { scanReceipt } from "./receipt.js";
+import { monthStatus, monthOf } from "./budget.js";
 
 const $ = (id) => document.getElementById(id);
 const screen = () => $("screen-add");
@@ -50,6 +51,34 @@ export function showAdd() {
   if (f.date < isoLocal() && !f.amountText) f.date = isoLocal(); // stale "today" from yesterday
   render();
   if (!["edited", "manual"].includes(f.rateSource)) ensureRate();
+  loadBudgetTiles();
+}
+
+// ---------- budget fills on category tiles ----------
+
+// For the month of the entry's date: { month, budget, spent } from budget.js, or null when that
+// month has no budget. Tiles of budgeted categories fill with the share used; others stay plain.
+let budgetTiles = null;
+
+async function loadBudgetTiles() {
+  if (!f || f.mode !== "add") return;
+  const month = monthOf(f.date);
+  const status = await monthStatus(month);
+  if (!f || f.mode !== "add" || monthOf(f.date) !== month) return; // moved on meanwhile
+  budgetTiles = status;
+  if (f.type === "expense") renderGrid();
+}
+
+// { used, text, over } for a category tile, or null when it has no budget this month.
+function tileBudget(categoryId) {
+  if (f.mode !== "add" || f.type !== "expense" || budgetTiles?.month !== monthOf(f.date)) return null;
+  const budget = budgetTiles.budget.get(categoryId);
+  if (!budget) return null;
+  const spent = budgetTiles.spent.get(categoryId) || 0;
+  const plain = (n) => Math.round(n).toLocaleString("en-US");
+  return spent > budget
+    ? { used: 100, over: true, text: `${plain(spent - budget)} over` }
+    : { used: (spent / budget) * 100, over: false, text: `${plain(budget - spent)} left` };
 }
 
 export async function showEdit(id) {
@@ -288,15 +317,23 @@ function renderGrid() {
   if (!items.length) {
     grid.replaceChildren(el("p", {
       class: "empty-note",
-      text: isIncome ? "No income sources yet. Add some in Settings." : "No categories yet. Add some in Settings.",
+      text: isIncome ? "No income sources yet. Add some in Profile → Settings." : "No categories yet. Add some in Profile → Settings.",
     }));
     return;
   }
-  grid.replaceChildren(...items.map((x) =>
-    el("button", {
-      type: "button", class: "cat-btn" + (x.id === selected ? " sel" : ""), "aria-pressed": String(x.id === selected),
+  grid.replaceChildren(...items.map((x) => {
+    const b = isIncome ? null : tileBudget(x.id);
+    return el("button", {
+      type: "button", "aria-pressed": String(x.id === selected),
+      class: "cat-btn" + (x.id === selected ? " sel" : "") + (b ? " budgeted" : "") + (b?.over ? " over" : ""),
+      style: b ? `--used:${b.used.toFixed(1)}%` : null,
+      "aria-label": b ? `${x.name}, ${b.text} this month` : null,
       onclick: () => pick(x.id),
-    }, el("span", { class: "ico", "aria-hidden": "true", text: x.icon }), el("span", { class: "nm", text: x.name }))));
+    },
+      el("span", { class: "ico", "aria-hidden": "true", text: x.icon }),
+      el("span", { class: "nm", text: x.name }),
+      b ? el("span", { class: "left", text: b.text }) : null);
+  }));
 }
 
 function pick(id) {
@@ -350,7 +387,13 @@ function renderMeta() {
     metaTile("On", friendlyDate(f.date),
       el("input", {
         type: "date", "aria-label": "Date", value: f.date,
-        onchange: (e) => { if (e.target.value) { f.date = e.target.value; renderMeta(); } },
+        onchange: (e) => {
+          if (!e.target.value) return;
+          const monthChanged = monthOf(e.target.value) !== monthOf(f.date);
+          f.date = e.target.value;
+          renderMeta();
+          if (monthChanged) { renderGrid(); loadBudgetTiles(); } // the tiles show that month's budget
+        },
         // With a mouse, a click on the (invisible) field doesn't open the calendar by itself.
         onclick: (e) => {
           if (!window.matchMedia("(pointer: fine)").matches) return;
@@ -466,12 +509,17 @@ async function save_() {
       label: "Undo",
       run: () => undo(saved.id, earned),
     });
+    // Count it on its category tile right away; the refetch below catches anyone else's entries.
+    if (expense && budgetTiles?.month === monthOf(row.occurred_on)) {
+      budgetTiles.spent.set(row.category_id, (budgetTiles.spent.get(row.category_id) || 0) + Number(saved.amount_egp));
+    }
     const keepLive = form.rateSource === "live";
     f = freshForm(form.type);
     if (keepLive) Object.assign(f, { rate: form.rate, rateSource: "live", rateNote: form.rateNote });
     render();
     document.querySelector("main").scrollTop = 0;
     if (!keepLive) ensureRate();
+    loadBudgetTiles();
   } catch (e) {
     form.saving = false;
     if (form === f) renderSaveButton();
@@ -483,6 +531,7 @@ async function undo(id, points) {
   try {
     await deleteTransaction(id);
     toast(points ? `Entry removed · −${points} pts` : "Entry removed");
+    loadBudgetTiles();
   } catch (e) {
     toast(friendlyError(e));
   }

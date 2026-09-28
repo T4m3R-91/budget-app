@@ -70,6 +70,37 @@ export async function fetchLeaderboard() {
   return unwrap(await sb.from("points_leaderboard").select("*"));
 }
 
+// ---------- monthly budgets (see budgets-migration.sql) ----------
+
+// [{ category_id, amount_egp }] for one month; month is its 1st day, e.g. "2026-10-01".
+export async function fetchBudget(month) {
+  return unwrap(await sb.from("budgets").select("category_id, amount_egp").eq("month", month));
+}
+
+// Replaces a month's whole budget at once. items: [{ category_id, amount_egp }]; [] clears it.
+export async function saveBudget(month, items) {
+  unwrap(await sb.rpc("set_month_budget", { p_month: month, p_items: items }));
+}
+
+// Just what budgets need from expenses dated first <= day < end:
+// [{ category_id, occurred_on, amount_egp, amount_usd }].
+export async function fetchExpensesBetween(first, end) {
+  const size = 1000;
+  const all = [];
+  for (let from = 0; ; from += size) {
+    const page = unwrap(await sb.from("transactions").select("category_id, occurred_on, amount_egp, amount_usd")
+      .eq("type", "expense").gte("occurred_on", first).lt("occurred_on", end).order("id").range(from, from + size - 1));
+    all.push(...page);
+    if (page.length < size) return all;
+  }
+}
+
+// The date of the earliest entry ("2026-07-01"), or null when there are none yet.
+export async function firstEntryDate() {
+  const row = unwrap(await sb.from("transactions").select("occurred_on").order("occurred_on").limit(1).maybeSingle());
+  return row?.occurred_on ?? null;
+}
+
 export async function insertListItem(table, row) {
   return unwrap(await sb.from(table).insert(row).select().single());
 }
