@@ -1,29 +1,43 @@
-// Past entries, newest first, grouped by day. Tap one to edit or delete it.
+// Past entries, newest first, grouped by day. Tap one to edit or delete it. The filter bar is the
+// Dashboard's (same bar, same settings; see filters.js), plus History's own All / Expenses / Income.
 
 import { state, byId, memberName } from "./state.js";
 import { el, fmtMoney, friendlyDate, friendlyError } from "./ui.js";
-import { fetchTransactionsPage } from "./db.js";
+import { fetchAllTransactions } from "./db.js";
+import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 
 const PAGE = 50;
-const FILTERS = { all: "All", expense: "Expenses", income: "Income" };
+const TYPES = { all: "All", expense: "Expenses", income: "Income" };
 
-let filter = "all";
-let items = [];
-let done = false;
-let loading = false;
+let type = "all";
+let rows = null; // every entry, newest first; null until loaded
+let shown = PAGE; // how many of the matching entries are on screen
 let error = null;
-let generation = 0; // ignores pages that arrive after the filter changed
+let generation = 0; // ignores a load that finishes after a newer one started
 
 const $ = (id) => document.getElementById(id);
 
-export function showHistory() {
-  generation++;
-  items = [];
-  done = false;
-  loading = false;
+onFiltersChange(() => {
+  if ($("screen-history")?.hidden !== false) return; // on the Dashboard: it redraws itself
+  shown = PAGE;
+  renderList();
+});
+
+export async function showHistory() {
+  const gen = ++generation;
+  shown = PAGE;
   error = null;
   render();
-  loadMore();
+  try {
+    const loaded = await fetchAllTransactions();
+    if (gen !== generation) return;
+    rows = loaded;
+    setFilterOptions(rows);
+  } catch (e) {
+    if (gen !== generation) return;
+    error = friendlyError(e);
+  }
+  renderList();
 }
 
 function render() {
@@ -31,23 +45,28 @@ function render() {
     el("div", { class: "screen-head" },
       el("h2", { text: "History" }),
       el("div", { class: "seg small", role: "group", "aria-label": "Show" },
-        Object.entries(FILTERS).map(([key, label]) =>
+        Object.entries(TYPES).map(([key, label]) =>
           el("button", {
-            type: "button", class: filter === key ? "active" : "", "aria-pressed": String(filter === key), text: label,
-            onclick: () => { if (filter !== key) { filter = key; showHistory(); } },
+            type: "button", class: type === key ? "active" : "", "aria-pressed": String(type === key), text: label,
+            onclick: () => { if (type !== key) { type = key; shown = PAGE; render(); } },
           })))),
+    el("div", { id: "h-filters" }),
     el("div", { id: "h-list" }),
     el("div", { id: "h-foot", class: "list-foot" })
   );
+  mountFilterBar($("h-filters")); // the Dashboard's bar, moved here with its settings
   renderList();
 }
+
+const matching = () => (rows || []).filter((t) => (type === "all" || t.type === type) && matchesFilters(t));
 
 function renderList() {
   const list = $("h-list");
   if (!list) return;
+  const all = matching();
   const nodes = [];
   let lastDate = null;
-  for (const t of items) {
+  for (const t of all.slice(0, shown)) {
     if (t.occurred_on !== lastDate) {
       lastDate = t.occurred_on;
       nodes.push(el("h3", { class: "hist-date", text: friendlyDate(t.occurred_on) }));
@@ -55,36 +74,24 @@ function renderList() {
     nodes.push(row(t));
   }
   list.replaceChildren(...nodes);
-  renderFoot();
+  renderFoot(all.length);
 }
 
-function renderFoot() {
+function renderFoot(total) {
   const foot = $("h-foot");
   if (!foot) return;
-  if (loading) foot.replaceChildren("Loading…");
-  else if (error) foot.replaceChildren(error, " ", el("button", { type: "button", class: "link-btn", text: "Try again", onclick: loadMore }));
-  else if (!done) foot.replaceChildren(el("button", { type: "button", class: "btn secondary small", text: "Load more", onclick: loadMore }));
-  else if (!items.length) foot.replaceChildren(filter === "income" ? "No income logged yet." : filter === "expense" ? "No expenses logged yet." : "Nothing logged yet. Tap Add to log your first entry.");
-  else foot.replaceChildren("That's everything.");
-}
-
-async function loadMore() {
-  if (loading || done) return;
-  const gen = generation;
-  loading = true;
-  error = null;
-  renderFoot();
-  try {
-    const page = await fetchTransactionsPage(items.length, PAGE, filter);
-    if (gen !== generation) return;
-    items.push(...page);
-    done = page.length < PAGE;
-  } catch (e) {
-    if (gen !== generation) return;
-    error = friendlyError(e);
-  }
-  loading = false;
-  renderList();
+  const filtered = total < (rows || []).filter((t) => type === "all" || t.type === type).length;
+  if (error) foot.replaceChildren(error, " ", el("button", { type: "button", class: "link-btn", text: "Try again", onclick: showHistory }));
+  else if (!rows) foot.replaceChildren("Loading…");
+  else if (shown < total) {
+    foot.replaceChildren(el("button", {
+      type: "button", class: "btn secondary small", text: `Load more (${total - shown} left)`,
+      onclick: () => { shown += PAGE; renderList(); },
+    }));
+  } else if (!total) {
+    foot.replaceChildren(filtered ? "No entries match these filters."
+      : type === "income" ? "No income logged yet." : type === "expense" ? "No expenses logged yet." : "Nothing logged yet. Tap Add to log your first entry.");
+  } else foot.replaceChildren("That's everything.");
 }
 
 function row(t) {
