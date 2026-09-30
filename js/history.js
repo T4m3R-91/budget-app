@@ -1,41 +1,51 @@
 // Past entries, newest first, grouped by day. Tap one to edit or delete it. The filter bar is the
 // Dashboard's (same bar, same settings; see filters.js), plus History's own All / Expenses / Income.
+// Entries saved offline show on top, under "Waiting to sync", until they reach the server.
 
 import { state, byId, memberName } from "./state.js";
-import { el, fmtMoney, friendlyDate, friendlyError } from "./ui.js";
+import { el, fmtMoney, friendlyDate, friendlyError, toast } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
 import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
+import { pendingEntries, removePending } from "./outbox.js";
 
 const PAGE = 50;
 const TYPES = { all: "All", expense: "Expenses", income: "Income" };
 
 let type = "all";
 let rows = null; // every entry, newest first; null until loaded
+let pending = []; // entries saved offline, still on the phone
+let removeArmed = null; // the waiting entry whose Remove was tapped once
 let shown = PAGE; // how many of the matching entries are on screen
 let error = null;
 let generation = 0; // ignores a load that finishes after a newer one started
 
 const $ = (id) => document.getElementById(id);
+const onScreen = () => $("screen-history")?.hidden === false;
 
 onFiltersChange(() => {
-  if ($("screen-history")?.hidden !== false) return; // on the Dashboard: it redraws itself
+  if (!onScreen()) return; // on the Dashboard: it redraws itself
   shown = PAGE;
   renderList();
 });
+// Something was queued, synced or removed: reload, so synced entries move into the list.
+window.addEventListener("outboxchange", () => { if (onScreen()) showHistory(); });
 
 export async function showHistory() {
   const gen = ++generation;
   shown = PAGE;
   error = null;
+  removeArmed = null;
   render();
   try {
-    const loaded = await fetchAllTransactions();
+    const [loaded, waiting] = await Promise.all([fetchAllTransactions(), pendingEntries()]);
     if (gen !== generation) return;
     rows = loaded;
+    pending = waiting;
     setFilterOptions(rows);
   } catch (e) {
     if (gen !== generation) return;
     error = friendlyError(e);
+    pending = await pendingEntries();
   }
   renderList();
 }
@@ -65,6 +75,10 @@ function renderList() {
   if (!list) return;
   const all = matching();
   const nodes = [];
+  const waiting = pending.filter((t) => (type === "all" || t.type === type) && matchesFilters(t));
+  if (waiting.length) {
+    nodes.push(el("h3", { class: "hist-date", text: "Waiting to sync" }), ...waiting.map(pendingRow));
+  }
   let lastDate = null;
   for (const t of all.slice(0, shown)) {
     if (t.occurred_on !== lastDate) {
@@ -92,6 +106,29 @@ function renderFoot(total) {
     foot.replaceChildren(filtered ? "No entries match these filters."
       : type === "income" ? "No income logged yet." : type === "expense" ? "No expenses logged yet." : "Nothing logged yet. Tap Add to log your first entry.");
   } else foot.replaceChildren("That's everything.");
+}
+
+// An entry saved offline: dated, but not yet on the server, so it can't be edited; it can be
+// removed from the phone before it syncs.
+function pendingRow(t) {
+  const income = t.type === "income";
+  const kind = income ? byId(state.incomeSources, t.income_source_id) : byId(state.categories, t.category_id);
+  const note = t.sync_error ? `⚠ Couldn't sync: ${t.sync_error}` : `⏳ ${friendlyDate(t.occurred_on)} · saved on this phone`;
+  return el("div", { class: `txn-row pending ${income ? "income" : "expense"}${t.sync_error ? " failed" : ""}` },
+    el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
+    el("span", { class: "txn-main" },
+      el("span", { class: "txn-title", text: kind?.name || "Unknown" }),
+      el("span", { class: "txn-sub", text: [byId(state.subcategories, t.subcategory_id)?.name, t.description].filter(Boolean).concat(note).join(" · ") })),
+    el("span", { class: "txn-amt" },
+      (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
+      el("button", {
+        type: "button", class: "btn danger small pending-remove", text: removeArmed === t.id ? "Tap again" : "Remove",
+        onclick: async () => {
+          if (removeArmed !== t.id) { removeArmed = t.id; return renderList(); }
+          await removePending(t.id);
+          toast("Removed from this phone");
+        },
+      })));
 }
 
 function row(t) {

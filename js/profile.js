@@ -6,9 +6,13 @@ import { el, toast, friendlyError } from "./ui.js";
 import { sb, fetchLeaderboard } from "./db.js";
 import { settingsCard } from "./settings.js";
 import { exportToExcel } from "./export.js";
+import { appVersion } from "./offline.js";
 
 let board = { status: "loading", rows: [] }; // loading | ready | missing | error
 let period = "all_time"; // or "this_month"
+let version = null; // e.g. "2.1.2", from sw.js; it only changes on Reload, which starts afresh
+
+const versionLine = () => `Household Budget${version ? ` ${version}` : ""}`;
 
 export function showProfile() {
   document.getElementById("screen-profile").replaceChildren(
@@ -17,8 +21,13 @@ export function showProfile() {
     el("section", { class: "set-section" }, el("h3", { text: "Points" }), pointsBox()),
     settingsCard(),
     downloadSection(),
-    el("p", { class: "app-version", text: "Household Budget 2.0" }));
+    el("p", { class: "app-version", id: "app-version", text: versionLine() }));
   loadBoard();
+  if (!version) appVersion().then((v) => {
+    version = v;
+    const line = document.getElementById("app-version");
+    if (line) line.textContent = versionLine();
+  });
 }
 
 // ---------- download ----------

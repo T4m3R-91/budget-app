@@ -133,7 +133,7 @@ async function load() {
 }
 
 async function currentRate() {
-  const live = navigator.onLine ? await getLiveRate() : null;
+  const live = await getLiveRate(); // offline: the last one fetched, if any
   if (live) return { rate: live.rate, source: "live" };
   try {
     const last = await latestEntryRate();

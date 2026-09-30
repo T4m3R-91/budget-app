@@ -42,17 +42,28 @@ const SOURCES = [
   },
 ];
 
+// The last rate fetched is also kept on the phone, so an entry logged offline can use it; the
+// Add screen labels it with its date ("live, 29 Sept"), as it does any rate.
+const KEPT = "lastLiveRate";
+
 // Resolves { rate, asOf: Date } or null.
 export async function getLiveRate({ force = false } = {}) {
   if (!force && cached && Date.now() - cached.fetchedAt < MAX_AGE_MS) return cached;
-  for (const source of SOURCES) {
-    try {
-      const { rate, asOf } = await source();
-      cached = { rate: round4(rate), asOf, fetchedAt: Date.now() };
-      return cached;
-    } catch {
-      /* next source */
+  if (navigator.onLine) {
+    for (const source of SOURCES) {
+      try {
+        const { rate, asOf } = await source();
+        cached = { rate: round4(rate), asOf, fetchedAt: Date.now() };
+        try { localStorage.setItem(KEPT, JSON.stringify({ rate: cached.rate, asOf: asOf.getTime() })); } catch { /* storage unavailable */ }
+        return cached;
+      } catch {
+        /* next source */
+      }
     }
   }
+  try {
+    const kept = JSON.parse(localStorage.getItem(KEPT));
+    if (kept?.rate > 0) return { rate: kept.rate, asOf: new Date(kept.asOf), fetchedAt: 0 };
+  } catch { /* nothing kept */ }
   return null;
 }
