@@ -5,7 +5,7 @@
   color-scheme: dark;
   --bg: #0f1419;
   --bg-fade: rgba(15, 20, 25, 0); /* --bg, fully transparent: the top of the Save bar's fade */
-  --bar-bg: rgba(15, 20, 25, 0.94);
+  --bar-bg: #0f1419; /* the tab bar, and the strip below it on iPhone */
   --panel: #1a2129;
   --panel2: #222b35;
   --line: #2d3742;
@@ -46,7 +46,7 @@
   color-scheme: light;
   --bg: #f4f6f8;
   --bg-fade: rgba(244, 246, 248, 0);
-  --bar-bg: rgba(255, 255, 255, 0.94);
+  --bar-bg: #ffffff;
   --panel: #ffffff;
   --panel2: #eef1f4;
   --line: #d8dee4;
@@ -81,6 +81,9 @@
    and the Save bar stay put (on iPhone the whole page used to rubber-band with them). */
 html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 html { -webkit-text-size-adjust: 100%; }
+/* On iPhone the strip below the tab bar (around the home-indicator line) is outside the page and
+   shows <html>'s color; in the app it matches the tab bar, so the bar runs to the bottom edge. */
+html:has(body.in-app) { background: var(--bar-bg); }
 body {
   margin: 0;
   background: var(--bg);
@@ -165,8 +168,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .form-error { color: var(--critical); font-size: 14px; min-height: 20px; margin: 4px 0 10px; }
 
 /* ---------- entry screen ---------- */
-.greeting { margin: 2px 0 14px; }
-.greeting p { margin: 0 0 2px; font-size: 13px; color: var(--muted); }
+.greeting { margin: 2px 0 12px; font-size: 17px; line-height: 1.3; color: var(--muted); }
+.greeting strong { color: var(--text); }
 .entry-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 40px; }
 .entry-head > :first-child { justify-self: start; }
 .entry-head > :nth-child(2) { justify-self: center; }
@@ -180,6 +183,7 @@ a.btn { display: inline-block; text-decoration: none; }
 /* Currency row comes first: the currency and rate chosen here apply to the amount and to Scan below. */
 .cur-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 10px; }
 .cur-row .seg { flex: 0 0 auto; }
+.income-mode #e-cur-seg button.active { background: var(--income); } /* green in Income, like its other highlights */
 .rate-box {
   flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 4px 6px;
   flex-wrap: wrap; min-height: 34px; text-align: right; border-radius: 10px; padding: 0 4px;
@@ -190,28 +194,44 @@ a.btn { display: inline-block; text-decoration: none; }
 .rate-input { width: 84px; text-align: center; padding: 6px 8px; }
 
 /* Amount and Scan are equal-width alternatives, as tall as the category tiles. */
-.amount-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; }
+.amount-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 16px; }
 .amount-row.solo { grid-template-columns: 1fr; }
+/* The number and its unit sit centered in the box, both ways; the converted value is pinned
+   underneath so it doesn't push them off center. */
 .amount-box {
-  display: flex; flex-direction: column; justify-content: center; height: 60px; padding: 0 12px; min-width: 0;
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 60px; padding: 0 12px; min-width: 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: text;
 }
 .amount-box:focus-within { border-color: var(--accent); }
 .income-mode .amount-box:focus-within { border-color: var(--income); }
-.amount-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.amount-main { display: flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 0; max-width: 100%; }
 .amount-cur { color: var(--muted); font-size: 13px; font-weight: 600; }
+/* The input is exactly as wide as its text: an invisible copy of the text (data-value) sizes the
+   cell, and the input fills it. Long amounts scroll inside the box instead of widening it. */
+.amount-fit {
+  display: inline-grid; grid-template-columns: minmax(0, max-content); min-width: 0;
+  font-size: 24px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.amount-fit::after { content: attr(data-value); grid-area: 1 / 1; visibility: hidden; white-space: pre; overflow: hidden; padding: 0 1px; }
+/* width 0 + min-width 100%: the input's own (font-based) minimum width doesn't count, it just
+   fills the cell its text sized. */
 .amount-input {
-  flex: 1; min-width: 0; background: transparent; border: 0; padding: 0; outline: none;
-  color: var(--text); font-size: 24px; line-height: 1.2; font-weight: 700; text-align: right;
-  font-variant-numeric: tabular-nums; caret-color: var(--accent);
+  grid-area: 1 / 1; width: 0; min-width: 100%; background: transparent; border: 0; padding: 0; outline: none;
+  font: inherit; color: var(--text); text-align: center; caret-color: var(--accent);
 }
 .amount-input::placeholder { color: var(--faint); }
-.converted { text-align: right; color: var(--muted); font-size: 12px; line-height: 1.2; min-height: 14px; font-variant-numeric: tabular-nums; }
+.converted {
+  position: absolute; left: 12px; right: 12px; bottom: 4px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--muted); font-size: 12px; line-height: 1.2; font-variant-numeric: tabular-nums;
+}
 .or { color: var(--muted); font-size: 13px; }
 .scan-btn { width: 100%; height: 60px; padding: 0 12px; white-space: nowrap; }
 
 /* Categories: same full-width 3 columns, shorter tiles. */
-.cat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; border-radius: 14px; }
+/* 16px above (the amount row's margin) and below: the categories are their own section. */
+.cat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; border-radius: 14px; }
 .cat-btn {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   height: 60px; padding: 5px 6px; background: var(--panel); border: 1px solid var(--line);
@@ -240,8 +260,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .cat-btn.over .left { color: var(--expense); font-weight: 600; }
 .empty-note { color: var(--muted); font-size: 13.5px; grid-column: 1 / -1; padding: 8px 0; }
 
-/* Subcategories hang directly off the chosen category. */
-.subchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+/* Subcategories open inside the grid, right under the chosen category's row, full width. */
+.subchips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .sub-lead { color: var(--muted); font-size: 12.5px; margin-right: 2px; }
 .subchip {
   height: 36px; padding: 0 12px; border-radius: 9px; background: var(--panel2);
@@ -249,12 +269,13 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .subchip.sel { border-color: var(--accent); background: var(--accent-soft); }
 
-/* By · On · With: same grid and height as the category tiles. */
+/* By · On · With (income: In): the same grid and size as the category tiles, but grey like the
+   Scan button, so they read as the entry's details rather than more categories. */
 .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .meta-tile {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-width: 0; height: 60px; padding: 0 8px; text-align: center;
-  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+  min-width: 0; height: 60px; padding: 0 8px; text-align: center; cursor: pointer;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .meta-tile:focus-within { border-color: var(--accent); }
 /* In Income mode every focus highlight is green, matching the income tiles and Save button. */
@@ -265,13 +286,20 @@ a.btn { display: inline-block; text-decoration: none; }
 .meta-tile .k { color: var(--muted); font-size: 11px; line-height: 1.2; }
 .meta-tile .v { max-width: 100%; font-size: 14px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta-tile select, .meta-tile input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-/* On, for a new entry or a recurring item: the right 15% is the ↻ Repeat button, the rest opens
-   the date picker. Blue once a repeat is set, with "Monthly" / "Yearly" under the date. The same
-   inset on both sides keeps the text centered on the whole tile, clear of the button. */
-.meta-tile.has-repeat { padding: 0 calc(15% + 4px); }
-.meta-tile.has-repeat input { width: 85%; }
+.meta-tile .on-text { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 100%; }
+/* On, for a new entry or a recurring item: the right 25% is the ↻ Repeat button, the rest opens
+   the date picker. Once a repeat is set, "Monthly" / "Yearly" shows under the date. The text is
+   centered on the whole tile; a longer date ("Yesterday", "28 Sept 2025") moves left rather than
+   running under the button: the side columns share the free space, but the right one never gets
+   narrower than the button. */
+.meta-tile.has-repeat {
+  display: grid; align-items: center; padding: 0;
+  grid-template-columns: minmax(6px, 1fr) minmax(0, auto) minmax(calc(25% + 4px), 1fr);
+}
+.meta-tile.has-repeat .on-text { grid-column: 2; }
+.meta-tile.has-repeat input { width: 75%; }
 .repeat-btn {
-  position: absolute; top: 0; bottom: 0; right: 0; z-index: 1; width: 15%; padding: 0;
+  position: absolute; top: 0; bottom: 0; right: 0; z-index: 1; width: 25%; padding: 0;
   border: 0; border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; line-height: 1;
 }
@@ -281,8 +309,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .repeat-seg { grid-column: 1 / -1; display: flex; }
 .repeat-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
 
-/* Note: three visible lines, below By · On · With. */
-.note-input { display: block; margin-top: 10px; resize: none; line-height: 1.4; font-family: inherit; font-size: 14px; background: var(--panel); }
+/* Note: one line below By · On · With, growing as you type (fitNote in entry.js). */
+.note-input { display: block; margin-top: 10px; resize: none; overflow: hidden; line-height: 1.4; font-family: inherit; font-size: 14px; background: var(--panel); }
 
 /* Save bar: pinned above the tab bar; content fades out as it scrolls underneath. */
 .action-bar {
@@ -334,7 +362,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 
 /* ---------- history ---------- */
-.screen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.screen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; } /* as .dash-head */
 .hist-date { margin: 18px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .txn-row {
   display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; align-items: center;

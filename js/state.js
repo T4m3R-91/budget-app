@@ -8,6 +8,7 @@ export const state = {
   subcategories: [],
   paymentMethods: [],
   incomeSources: [],
+  receivingMethods: null, // where income comes in ("In"); null until its migration has run
   displayCurrency: "EGP", // the Dashboard's and Budget tab's EGP/USD switch (one setting for both)
 };
 

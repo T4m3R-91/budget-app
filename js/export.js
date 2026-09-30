@@ -11,7 +11,7 @@ const MONEY_COLUMNS = new Set(["Amount", "Amount_EGP", "Amount_USD"]);
 
 const TX_HEADERS = ["Date", "Category", "Subcategory", "Description", "Amount", "Currency", "Amount_EGP",
   "Amount_USD", "Who Paid", "Payment Method", "Month", "Year", RATE];
-const INCOME_HEADERS = ["Date", "Source", "Amount", "Currency", "Amount_EGP", "Amount_USD", "Who", "Month", "Year", RATE];
+const INCOME_HEADERS = ["Date", "Source", "Amount", "Currency", "Amount_EGP", "Amount_USD", "Who", "Received In", "Month", "Year", RATE];
 
 // Excel serial day number, computed in UTC so no time zone can shift the date.
 function excelDate(iso) {
@@ -60,6 +60,7 @@ export async function exportToExcel() {
     byId(state.incomeSources, t.income_source_id)?.name ?? "",
     Number(t.amount), t.currency, Number(t.amount_egp), Number(t.amount_usd),
     memberName(t.who),
+    byId(state.receivingMethods ?? [], t.receiving_method_id)?.name ?? "", // the Add screen's "In"
     ...monthYear(t.occurred_on),
     Number(t.rate),
   ]);

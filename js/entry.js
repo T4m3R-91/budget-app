@@ -30,16 +30,25 @@ let commitRateEdit = null; // set while the rate field is open, so Save can appl
 
 // ---------- form state ----------
 
-function lastPaymentKey() {
-  return "lastPayment:" + state.me.email;
+// With and In start on the method you used last (per person, on this phone), or else the first
+// one in the list. "Not set" is still the dropdown's first option.
+const lastPaymentKey = () => "lastPayment:" + state.me.email;
+const lastReceivingKey = () => "lastReceiving:" + state.me.email;
+
+function remembered(key, list) {
+  let id = null;
+  try { id = localStorage.getItem(key); } catch { /* storage unavailable */ }
+  const item = byId(list, id);
+  if (item && !item.hidden) return item.id;
+  return list.find((x) => !x.hidden)?.id || null;
 }
 
-function rememberedPayment() {
-  let id = null;
-  try { id = localStorage.getItem(lastPaymentKey()); } catch { /* storage unavailable */ }
-  const pm = byId(state.paymentMethods, id);
-  if (pm && !pm.hidden) return pm.id;
-  return state.paymentMethods.find((p) => !p.hidden)?.id || null;
+const rememberedPayment = () => remembered(lastPaymentKey(), state.paymentMethods);
+const rememberedReceiving = () => (state.receivingMethods ? remembered(lastReceivingKey(), state.receivingMethods) : null);
+
+function rememberMethod(key, id) {
+  if (!id) return; // "Not set" doesn't replace what's remembered
+  try { localStorage.setItem(key, id); } catch { /* storage unavailable */ }
 }
 
 function freshForm(type = "expense") {
@@ -48,7 +57,7 @@ function freshForm(type = "expense") {
     type, amountText: "", currency: "EGP",
     rate: null, rateSource: null, rateNote: "", rateLoading: false, editingRate: false,
     categoryId: null, subcategoryId: null, sourceId: null,
-    paymentMethodId: rememberedPayment(), who: state.me.email,
+    paymentMethodId: rememberedPayment(), receivingMethodId: rememberedReceiving(), who: state.me.email,
     date: isoLocal(), description: "",
     saving: false, confirmDelete: false,
     repeat: null, repeatOpen: false, // null | "monthly" | "yearly"; repeatOpen shows its choices
@@ -61,7 +70,8 @@ function fromItem(item) {
   return {
     amountText: String(Number(item.amount)), currency: item.currency,
     categoryId: item.category_id, subcategoryId: item.subcategory_id, sourceId: item.income_source_id,
-    paymentMethodId: item.payment_method_id, who: item.who, description: item.description || "",
+    paymentMethodId: item.payment_method_id, receivingMethodId: item.receiving_method_id ?? null,
+    who: item.who, description: item.description || "",
   };
 }
 
@@ -157,8 +167,8 @@ export async function showEdit(id) {
     amountText: String(Number(t.amount)), currency: t.currency,
     rate: Number(t.rate), rateSource: "saved", rateNote: "saved",
     categoryId: t.category_id, subcategoryId: t.subcategory_id, sourceId: t.income_source_id,
-    paymentMethodId: t.payment_method_id, who: t.who, date: t.occurred_on,
-    description: t.description || "",
+    paymentMethodId: t.payment_method_id, receivingMethodId: t.receiving_method_id ?? null,
+    who: t.who, date: t.occurred_on, description: t.description || "",
   };
   render();
 }
@@ -215,22 +225,25 @@ function render() {
     : f.recurring ? titled(backToBudget(), `Log ${recurringLabel(f.recurring.item)}`)
     : el("div", { class: "entry-head centered" }, typeSeg());
   const greeting = f.mode === "add" && !f.recurring
-    ? el("div", { class: "greeting" }, el("p", { text: GREETING[partOfDay()] }), el("h2", { text: state.me.display_name }))
+    ? el("p", { class: "greeting" }, `${GREETING[partOfDay()]}, `, el("strong", { text: state.me.display_name }))
     : null;
 
-  // The amount box shows the result of the currency row above it: unit beside the number,
-  // and the converted value underneath.
+  // The amount box shows the result of the currency row above it: the number and its unit,
+  // centered in the box, and the converted value underneath. The input is as wide as what's typed
+  // (see .amount-fit), so the pair stays centered.
   const amountBox = el("label", { id: "e-amount-box", class: "amount-box" },
     el("span", { class: "amount-main" },
-      el("input", {
-        id: "e-amount", class: "amount-input", type: "text", inputmode: "decimal",
-        autocomplete: "off", enterkeyhint: "done", placeholder: "0", "aria-label": "Amount",
-        value: f.amountText,
-        oninput: (e) => {
-          f.amountText = e.target.value;
-          renderConverted();
-        },
-      }),
+      el("span", { id: "e-amount-fit", class: "amount-fit" },
+        el("input", {
+          id: "e-amount", class: "amount-input", type: "text", inputmode: "decimal", size: 1,
+          autocomplete: "off", enterkeyhint: "done", placeholder: "0", "aria-label": "Amount",
+          value: f.amountText,
+          oninput: (e) => {
+            f.amountText = e.target.value;
+            fitAmount();
+            renderConverted();
+          },
+        })),
       el("span", { id: "e-amount-cur", class: "amount-cur" })),
     el("span", { id: "e-converted", class: "converted", "aria-live": "polite" }));
 
@@ -256,24 +269,38 @@ function render() {
       el("div", { id: "e-rate", class: "rate-box" })),
     amountRow,
     el("div", { id: "e-grid", class: "cat-grid", role: "group", "aria-label": income ? "Source" : "Category" }),
-    el("div", { id: "e-subs", class: "subchips", role: "group", "aria-label": "Subcategory" }),
     el("div", { id: "e-meta", class: "meta-grid" }),
     el("textarea", {
-      id: "e-desc", class: "text-input note-input", rows: 3, maxlength: 200,
+      id: "e-desc", class: "text-input note-input", rows: 1, maxlength: 200,
       placeholder: income ? "Note (optional)" : "Note (optional), e.g. Negmet Heliopolis",
       "aria-label": "Note", value: f.description,
-      oninput: (e) => { f.description = e.target.value; },
+      oninput: (e) => { f.description = e.target.value; fitNote(); },
     }),
     el("div", { class: "action-bar" }, actions),
   ].filter(Boolean));
 
+  fitAmount();
+  fitNote();
   renderCurrency();
   renderRate();
   renderConverted();
   renderGrid();
-  renderSubs();
   renderMeta();
   renderSaveButton();
+}
+
+// The amount input takes the width of what's typed (or the "0" placeholder).
+function fitAmount() {
+  const fit = $("e-amount-fit");
+  if (fit) fit.dataset.value = f.amountText || "0";
+}
+
+// The note is one line and grows with what's typed.
+function fitNote() {
+  const note = $("e-desc");
+  if (!note) return;
+  note.style.height = "auto";
+  if (note.scrollHeight) note.style.height = `${note.scrollHeight + note.offsetHeight - note.clientHeight}px`;
 }
 
 function typeSeg() {
@@ -366,8 +393,8 @@ function renderConverted() {
   }
   box.textContent =
     f.currency === "USD"
-      ? `≈ ${fmtMoney(round2(amt * f.rate), "EGP")}`
-      : `≈ ${fmtMoney(round2(amt / f.rate), "USD")}`;
+      ? `≈ ${fmtMoney(round2(amt * f.rate), "EGP", { code: true })}`
+      : `≈ ${fmtMoney(round2(amt / f.rate), "USD", { code: true })}`;
 }
 
 function renderGrid() {
@@ -385,7 +412,7 @@ function renderGrid() {
   grid.replaceChildren(...items.map((x) => {
     const b = isIncome ? null : tileBudget(x.id);
     return el("button", {
-      type: "button", "aria-pressed": String(x.id === selected),
+      type: "button", "aria-pressed": String(x.id === selected), "data-id": x.id,
       class: "cat-btn" + (x.id === selected ? " sel" : "") + (b ? " budgeted" : "") + (b?.over ? " over" : ""),
       style: b ? `--used:${b.used.toFixed(1)}%` : null,
       "aria-label": b ? `${x.name}, ${b.text} this month` : null,
@@ -395,35 +422,42 @@ function renderGrid() {
       el("span", { class: "nm", text: x.name }),
       b ? el("span", { class: "left", text: b.text }) : null);
   }));
+  renderSubs();
 }
 
+// Tapping the picked tile again unpicks it, which also closes its subcategories.
 function pick(id) {
   if (f.type === "income") {
-    f.sourceId = id;
+    f.sourceId = f.sourceId === id ? null : id;
   } else {
-    if (f.categoryId !== id) f.subcategoryId = null;
-    f.categoryId = id;
-    renderSubs();
+    f.subcategoryId = null;
+    f.categoryId = f.categoryId === id ? null : id;
   }
   renderGrid();
 }
 
-// Subcategory chips appear only once a category with subcategories is picked (expenses only).
+const GRID_COLUMNS = 3; // as .cat-grid in styles.css
+
+// Subcategory chips (expenses only) open right under the row of the picked category, across the
+// grid's full width.
 function renderSubs() {
-  const box = $("e-subs");
-  if (!box) return;
+  const grid = $("e-grid");
+  if (!grid) return;
+  grid.querySelector("#e-subs")?.remove();
   const category = f.type === "expense" ? byId(state.categories, f.categoryId) : null;
   const subs = category ? subcategoriesOf(category.id).filter((s) => !s.hidden || s.id === f.subcategoryId) : [];
-  box.hidden = !subs.length;
-  if (!subs.length) return;
-  box.replaceChildren(
+  const tiles = [...grid.querySelectorAll(".cat-btn")];
+  const at = tiles.findIndex((t) => t.dataset.id === category?.id);
+  if (!subs.length || at < 0) return;
+  const rowEnd = tiles[Math.min(tiles.length, (Math.floor(at / GRID_COLUMNS) + 1) * GRID_COLUMNS) - 1];
+  rowEnd.after(el("div", { id: "e-subs", class: "subchips", role: "group", "aria-label": "Subcategory" },
     el("span", { class: "sub-lead", text: `${category.name} ›` }),
     ...subs.map((s) =>
       el("button", {
         type: "button", class: "subchip" + (s.id === f.subcategoryId ? " sel" : ""),
         "aria-pressed": String(s.id === f.subcategoryId), text: s.name,
         onclick: () => { f.subcategoryId = f.subcategoryId === s.id ? null : s.id; renderSubs(); },
-      })));
+      }))));
 }
 
 function metaTile(label, value, control) {
@@ -436,7 +470,18 @@ function selectControl(ariaLabel, options, value, onChange) {
     options.map((o) => el("option", { value: o.value, text: o.label, selected: o.value === value })));
 }
 
-// By · On · With (income: By · On), laid out on the same 3-column grid as the categories.
+// A "Not set" + list picker, as for With and In.
+function methodTile(label, ariaLabel, list, value, onChange) {
+  const options = [{ value: "", label: "Not set" }, ...list
+    .filter((m) => !m.hidden || m.id === value)
+    .map((m) => ({ value: m.id, label: m.name }))];
+  const current = value ?? "";
+  return metaTile(label, options.find((o) => o.value === current)?.label ?? "Not set",
+    selectControl(ariaLabel, options, current, (v) => { onChange(v || null); renderMeta(); }));
+}
+
+// By · On · With (income: By · On · In), laid out on the same 3-column grid as the categories but
+// grey and borderless, so they read as the entry's details rather than more categories.
 function renderMeta() {
   const income = f.type === "income";
   const people = state.members.map((m) => ({
@@ -448,12 +493,9 @@ function renderMeta() {
     onTile(),
   ];
   if (!income) {
-    const payments = [{ value: "", label: "Not set" }, ...state.paymentMethods
-      .filter((p) => !p.hidden || p.id === f.paymentMethodId)
-      .map((p) => ({ value: p.id, label: p.name }))];
-    const current = f.paymentMethodId ?? "";
-    tiles.push(metaTile("With", payments.find((p) => p.value === current)?.label ?? "Not set",
-      selectControl("Paid with", payments, current, (v) => { f.paymentMethodId = v || null; renderMeta(); })));
+    tiles.push(methodTile("With", "Paid with", state.paymentMethods, f.paymentMethodId, (v) => { f.paymentMethodId = v; }));
+  } else if (state.receivingMethods) { // once receiving-methods-migration.sql has run
+    tiles.push(methodTile("In", "Received in", state.receivingMethods, f.receivingMethodId, (v) => { f.receivingMethodId = v; }));
   }
   if (canRepeat() && f.repeatOpen) tiles.push(repeatChoices());
   $("e-meta").replaceChildren(...tiles);
@@ -463,7 +505,7 @@ function renderMeta() {
 // entry, or logging a recurring item's due date.
 const canRepeat = () => (f.mode === "add" && !f.recurring) || f.mode === "recur";
 
-// On: tapping the tile opens the date picker; its right 15% is the ↻ Repeat button.
+// On: tapping the tile opens the date picker; its right 25% is the ↻ Repeat button.
 function onTile() {
   const repeat = canRepeat();
   const date = el("input", {
@@ -489,9 +531,10 @@ function onTile() {
           onclick: (e) => { e.preventDefault(); e.stopPropagation(); f.repeatOpen = !f.repeatOpen; renderMeta(); },
         }, "↻")
       : null,
-    el("span", { class: "k", text: "On" }),
-    el("span", { class: "v", text: friendlyDate(f.date) }),
-    f.repeat ? el("span", { class: "r", text: f.repeat === "monthly" ? "Monthly" : "Yearly" }) : null,
+    el("span", { class: "on-text" },
+      el("span", { class: "k", text: "On" }),
+      el("span", { class: "v", text: friendlyDate(f.date) }),
+      f.repeat ? el("span", { class: "r", text: f.repeat === "monthly" ? "Monthly" : "Yearly" }) : null),
     date);
 }
 
@@ -590,6 +633,8 @@ async function save_() {
     subcategory_id: expense ? form.subcategoryId : null,
     income_source_id: expense ? null : form.sourceId,
     payment_method_id: expense ? form.paymentMethodId : null,
+    // Only once receiving-methods-migration.sql has added the column.
+    ...(state.receivingMethods ? { receiving_method_id: expense ? null : form.receivingMethodId } : {}),
     who: form.who,
     description: form.description.trim() || null,
   };
@@ -621,9 +666,8 @@ async function save_() {
       return;
     }
     if (form.recurring) Object.assign(row, { recurring_id: form.recurring.item.id, recurring_due_on: form.recurring.due });
-    if (row.payment_method_id) {
-      try { localStorage.setItem(lastPaymentKey(), row.payment_method_id); } catch { /* storage unavailable */ }
-    }
+    rememberMethod(lastPaymentKey(), row.payment_method_id);
+    rememberMethod(lastReceivingKey(), row.receiving_method_id);
     if (!navigator.onLine) return await saveOffline(form, row);
     const saved = await insertTransaction(row);
     // Set to repeat: the item starts with this entry as its first occurrence.
@@ -791,6 +835,7 @@ async function runScan(file) {
           onclick: () => {
             f.amountText = String(c.value);
             $("e-amount").value = f.amountText;
+            fitAmount();
             renderConverted();
             close();
           },
