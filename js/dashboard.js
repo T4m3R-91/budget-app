@@ -1,34 +1,30 @@
-// The dashboard from the earlier artifact, now reading live data: filters apply to every
-// KPI, chart and the table; EGP/USD switches between each row's frozen converted amounts.
+// The dashboard: totals and charts only (individual entries live in History). Filters apply to
+// every total and chart; EGP/USD switches between each entry's frozen converted amounts.
 
-import { state, byId, memberName } from "./state.js";
-import { el, fmtMoney, friendlyError, loadScript, loadStyle, toast, isoLocal, parseISODate } from "./ui.js";
+import { state, byId } from "./state.js";
+import { el, fmtMoney, friendlyError, loadScript, isoLocal, parseISODate } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
+import { filters, mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 
 const CHART_JS = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
-const FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js";
-const FLATPICKR_CSS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const COLOR = {}; // chart colors, read from the Day/Night theme's CSS tokens on each render
-const TABLE_LIMIT = 300;
 const RANGES = [["1m", "1M"], ["1y", "1Y"], ["max", "Max"]];
 const EMPTY = { "1m": "No entries in the last 30 days.", "1y": "No entries in the past year.", max: "No entries in this view yet." };
 
 const view = {
   rows: [],
   currency: "EGP",
-  filters: { search: "", categories: new Set(), who: new Set(), payments: new Set(), from: "", to: "" },
-  sort: { key: "iso", dir: "desc" },
   range: "max", // the trend chart's window; kept while the app is open
 };
 let trendChart = null;
-let picker = null; // the date-range calendar, created the first time Dates is opened
 let built = false;
 
 const $ = (id) => document.getElementById(id);
 
 export async function showDashboard() {
   if (!built) build();
+  mountFilterBar($("d-filters")); // the same bar as History's, with the same settings
   view.currency = state.displayCurrency; // the EGP/USD switch is shared with the Budget tab
   renderCurrencySeg();
   setStatus("Loading…");
@@ -36,7 +32,7 @@ export async function showDashboard() {
     const [txns] = await Promise.all([fetchAllTransactions(), loadScript(CHART_JS)]);
     view.rows = txns.map(enrich);
     setStatus("");
-    buildFilterMenus();
+    setFilterOptions(txns);
     renderAll();
   } catch (e) {
     setStatus(friendlyError(e));
@@ -51,6 +47,7 @@ function setStatus(text) {
 function enrich(t) {
   const income = t.type === "income";
   return {
+    t, // as loaded, for the shared filters
     id: t.id,
     type: t.type,
     iso: t.occurred_on,
@@ -61,7 +58,6 @@ function enrich(t) {
     paymentId: t.payment_method_id,
     payment: byId(state.paymentMethods, t.payment_method_id)?.name || "",
     who: t.who,
-    whoName: memberName(t.who),
     description: t.description || "",
     EGP: Number(t.amount_egp),
     USD: Number(t.amount_usd),
@@ -79,17 +75,7 @@ function build() {
   $("screen-dashboard").replaceChildren(
     el("div", { class: "dash-head" }, el("h2", { text: "Dashboard" }), currencySeg),
     el("p", { id: "d-status", class: "muted", hidden: true }),
-    el("div", { class: "filter-bar" },
-      el("div", { class: "toolbar" },
-        el("input", {
-          type: "search", id: "d-search", placeholder: "Search description, category…", "aria-label": "Search",
-          oninput: (e) => { view.filters.search = e.target.value; renderAll(); },
-        }),
-        el("div", { class: "ms-wrap", id: "d-ms-cat" }),
-        el("div", { class: "ms-wrap", id: "d-ms-who" }),
-        el("div", { class: "ms-wrap", id: "d-ms-pay" }),
-        dateFilter(),
-        el("button", { type: "button", class: "btn secondary small", text: "Clear", onclick: clearFilters }))),
+    el("div", { id: "d-filters" }),
     el("div", { class: "kpis" },
       kpi("Total spend", "d-kpi-spend", "spend"),
       kpi("Total income", "d-kpi-income", "income"),
@@ -102,16 +88,11 @@ function build() {
         el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Cash flow chart: income, spend and cumulative net", role: "img" }))),
       el("div", { class: "card" }, el("h3", { text: "Spend by category" }),
         el("div", { class: "treemap", id: "d-cat-box", role: "group", "aria-label": "Spend by category" }),
-        el("p", { id: "d-cat-detail", class: "tm-detail", "aria-live": "polite" }))),
-    el("div", { class: "table-card" },
-      el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, el("tr", { id: "d-thead" })), el("tbody", { id: "d-tbody" }))),
-      el("p", { id: "d-table-note", class: "table-note", hidden: true }))
+        el("p", { id: "d-cat-detail", class: "tm-detail", "aria-live": "polite" })))
   );
   renderCurrencySeg();
   renderRangeSeg();
-  paintDates();
-  buildTableHead();
-  document.addEventListener("click", () => closeMenus());
+  onFiltersChange(() => { if (!$("screen-dashboard").hidden) renderAll(); });
   // Charts draw with the theme's colors, so redraw them if Auto flips Day/Night while they're on screen.
   window.addEventListener("themechange", () => { if (!$("screen-dashboard").hidden) renderAll(); });
   // Treemap tiles are laid out for the box's size: lay them out again when it changes.
@@ -138,161 +119,10 @@ function renderRangeSeg() {
     })));
 }
 
-function clearFilters() {
-  const f = view.filters;
-  f.search = "";
-  f.categories.clear(); f.who.clear(); f.payments.clear();
-  $("d-search").value = "";
-  clearDates();
-  buildFilterMenus();
-  renderAll();
-}
+// ---------- filtering (the bar and its settings are shared with History; see filters.js) ----------
 
-// ---------- date range: one button, a calendar where you tap a start day then an end day ----------
-
-function dateFilter() {
-  return el("div", { class: "ms-wrap", id: "d-dates" },
-    el("button", { type: "button", class: "ms-btn", id: "d-dates-btn", "aria-haspopup": "true", onclick: toggleDates }),
-    el("div", { class: "ms-drop date-drop", id: "d-dates-drop", hidden: true, onclick: (e) => e.stopPropagation() },
-      el("div", { id: "d-cal" }),
-      el("div", { class: "date-foot" },
-        el("span", { text: "Tap a start day, then an end day." }),
-        el("button", { type: "button", class: "link-btn", text: "Clear", onclick: () => { clearDates(); renderAll(); } }))));
-}
-
-async function toggleDates(e) {
-  e.stopPropagation();
-  const drop = $("d-dates-drop");
-  const opening = drop.hidden;
-  closeMenus();
-  if (!opening) return;
-  try {
-    loadStyle(FLATPICKR_CSS);
-    await loadScript(FLATPICKR_JS);
-  } catch (err) {
-    toast(friendlyError(err));
-    return;
-  }
-  if (!picker) {
-    picker = window.flatpickr($("d-cal"), {
-      inline: true, mode: "range", disableMobile: true, // disableMobile: iPhone's own picker can't do ranges
-      onChange: (dates) => {
-        // One day picked = the start of the range; the second pick completes it.
-        const [from = "", to = ""] = dates.map((d) => isoLocal(d));
-        Object.assign(view.filters, { from, to });
-        paintDates();
-        renderAll();
-        if (dates.length === 2) closeMenus();
-      },
-    });
-  }
-  drop.hidden = false;
-  // Keep the calendar on screen when the button sits near the right edge.
-  drop.style.left = "0px";
-  const over = drop.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
-  if (over > 0) drop.style.left = `${-over}px`;
-}
-
-function clearDates() {
-  Object.assign(view.filters, { from: "", to: "" });
-  picker?.clear(false);
-  paintDates();
-}
-
-function paintDates() {
-  const { from, to } = view.filters;
-  const button = $("d-dates-btn");
-  button.textContent = from && to ? `${shortDate(from)} – ${shortDate(to)}` : from ? `From ${shortDate(from)}` : "Dates";
-  button.classList.toggle("active", Boolean(from));
-}
-
-// "1 Aug", or "1 Aug 2025" outside the current year.
-function shortDate(iso) {
-  const d = parseISODate(iso);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === new Date().getFullYear() ? "" : ` ${d.getFullYear()}`}`;
-}
-
-// ---------- multi-select filter menus ----------
-
-function closeMenus() {
-  document.querySelectorAll("#screen-dashboard .ms-drop").forEach((d) => { d.hidden = true; });
-}
-
-function multiSelect(containerId, label, options, selected) {
-  const button = el("button", { type: "button", class: "ms-btn", "aria-haspopup": "true" });
-  const drop = el("div", { class: "ms-drop", hidden: true, onclick: (e) => e.stopPropagation() },
-    options.length
-      ? options.map((o) =>
-          el("label", { class: "ms-item" },
-            el("input", {
-              type: "checkbox", checked: selected.has(o.value),
-              onchange: (e) => {
-                if (e.target.checked) selected.add(o.value); else selected.delete(o.value);
-                paint();
-                renderAll();
-              },
-            }),
-            o.label))
-      : el("div", { class: "ms-item muted", text: "Nothing to filter yet" }));
-  const paint = () => {
-    button.textContent = selected.size ? `${label} (${selected.size})` : label;
-    button.classList.toggle("active", selected.size > 0);
-  };
-  button.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const open = drop.hidden;
-    closeMenus();
-    drop.hidden = !open;
-  });
-  paint();
-  $(containerId).replaceChildren(button, drop);
-}
-
-function buildFilterMenus() {
-  const used = (key) => new Set(view.rows.map((r) => r[key]).filter(Boolean));
-  const usedCats = used("categoryId");
-  const usedPays = used("paymentId");
-  const usedWho = used("who");
-  multiSelect("d-ms-cat", "Category",
-    state.categories.filter((c) => usedCats.has(c.id)).map((c) => ({ value: c.id, label: `${c.icon} ${c.name}` })),
-    view.filters.categories);
-  multiSelect("d-ms-who", "Who",
-    state.members.filter((m) => usedWho.has(m.email)).map((m) => ({ value: m.email, label: m.display_name })),
-    view.filters.who);
-  multiSelect("d-ms-pay", "Payment",
-    state.paymentMethods.filter((p) => usedPays.has(p.id)).map((p) => ({ value: p.id, label: p.name })),
-    view.filters.payments);
-}
-
-// ---------- filtering ----------
-
-function inRange(r) {
-  const { from, to } = view.filters;
-  return (!from || r.iso >= from) && (!to || r.iso <= to);
-}
-
-function matches(r, ...fields) {
-  const q = view.filters.search.trim().toLowerCase();
-  return !q || fields.join(" ").toLowerCase().includes(q);
-}
-
-function filteredExpenses() {
-  const f = view.filters;
-  return view.rows.filter((r) =>
-    r.type === "expense" && inRange(r) &&
-    (!f.categories.size || f.categories.has(r.categoryId)) &&
-    (!f.who.size || f.who.has(r.who)) &&
-    (!f.payments.size || f.payments.has(r.paymentId)) &&
-    matches(r, r.category, r.subcategory, r.description, r.payment));
-}
-
-// Category and payment filters describe spending, so they don't narrow income.
-function filteredIncome() {
-  const f = view.filters;
-  return view.rows.filter((r) =>
-    r.type === "income" && inRange(r) && (!f.who.size || f.who.has(r.who)) && matches(r, r.source, r.description));
-}
-
+const filteredExpenses = () => view.rows.filter((r) => r.type === "expense" && matchesFilters(r.t));
+const filteredIncome = () => view.rows.filter((r) => r.type === "income" && matchesFilters(r.t));
 // ---------- rendering ----------
 
 function renderAll() {
@@ -305,7 +135,6 @@ function renderAll() {
   renderKpis(expenses, income);
   renderTrend(expenses, income);
   renderCategories(expenses);
-  renderTable(expenses);
 }
 
 function renderKpis(expenses, income) {
@@ -359,7 +188,7 @@ function trendSeries(expenses, income) {
     const start = new Date();
     if (view.range === "1m") start.setDate(start.getDate() - 29);
     else { start.setFullYear(start.getFullYear() - 1); start.setDate(start.getDate() + 1); }
-    const { from, to } = view.filters;
+    const { from, to } = filters;
     const first = [isoLocal(start), from].sort().at(-1);
     const last = to && to < isoLocal() ? to : isoLocal();
     if (first > last || !all.some((r) => r.iso >= first && r.iso <= last)) return null;
@@ -596,56 +425,4 @@ function squarify(values, W, H) {
   }
   if (row.length) place(row);
   return rects;
-}
-
-// ---------- table ----------
-
-const COLUMNS = [
-  { key: "iso", label: "Date" },
-  { key: "category", label: "Category" },
-  { key: "subcategory", label: "Subcategory" },
-  { key: "description", label: "Description" },
-  { key: "amount", label: "Amount", numeric: true },
-  { key: "whoName", label: "Who" },
-  { key: "payment", label: "Payment" },
-];
-
-function buildTableHead() {
-  $("d-thead").replaceChildren(...COLUMNS.map((c) =>
-    el("th", {
-      class: [c.numeric ? "amt" : "", view.sort.key === c.key ? `sorted-${view.sort.dir}` : ""].join(" "),
-      scope: "col", text: c.label,
-      onclick: () => {
-        if (view.sort.key === c.key) view.sort.dir = view.sort.dir === "asc" ? "desc" : "asc";
-        else Object.assign(view.sort, { key: c.key, dir: c.numeric || c.key === "iso" ? "desc" : "asc" });
-        buildTableHead();
-        renderTable(filteredExpenses());
-      },
-    })));
-}
-
-function renderTable(expenses) {
-  const { key, dir } = view.sort;
-  const value = (r) => (key === "amount" ? amount(r) : String(r[key] || "").toLowerCase());
-  const sorted = expenses.slice().sort((a, b) => {
-    const va = value(a), vb = value(b);
-    return (va < vb ? -1 : va > vb ? 1 : 0) * (dir === "asc" ? 1 : -1);
-  });
-  const tbody = $("d-tbody");
-  if (!sorted.length) {
-    tbody.replaceChildren(el("tr", {}, el("td", { colspan: COLUMNS.length, class: "muted", text: "No expenses match these filters." })));
-  } else {
-    tbody.replaceChildren(...sorted.slice(0, TABLE_LIMIT).map((r) =>
-      el("tr", {},
-        el("td", { text: r.iso }),
-        el("td", { text: r.category }),
-        el("td", { text: r.subcategory }),
-        el("td", { text: r.description }),
-        el("td", { class: "amt", text: fmtMoney(amount(r), view.currency, { code: true }) }),
-        el("td", { text: r.whoName }),
-        el("td", { text: r.payment }))));
-  }
-  const note = $("d-table-note");
-  note.hidden = sorted.length <= TABLE_LIMIT;
-  note.textContent = `Showing the first ${TABLE_LIMIT} of ${sorted.length}. Narrow the filters, or use Download Excel in Profile for everything.`;
 }

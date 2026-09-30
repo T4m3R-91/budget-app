@@ -99,6 +99,7 @@ body::before {
 main {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable; /* same width with or without a scrollbar, so tabs don't shift sideways */
   padding: calc(var(--safe-top) + 12px) 16px calc(var(--safe-bottom) + 24px);
 }
 body.in-app main { bottom: var(--tabbar-total); padding-bottom: 24px; }
@@ -115,7 +116,6 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 .small { font-size: 13px; }
 
 .screen { max-width: 560px; margin: 0 auto; }
-.screen.wide { max-width: 1200px; }
 .center-screen { min-height: 60dvh; display: grid; place-items: center; text-align: center; }
 .card-plain { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; max-width: 420px; }
 .card-plain h1 { font-size: 20px; margin: 0 0 8px; }
@@ -361,6 +361,9 @@ a.btn { display: inline-block; text-decoration: none; }
   padding: 0 10px; height: 38px; flex: 1 1 200px; min-width: 0;
 }
 .ms-wrap { position: relative; }
+/* Clear filters: a trash can, as tall as the other filter buttons. */
+.clear-filters { display: grid; place-items: center; width: 42px; height: 38px; padding: 0; }
+.clear-filters svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .ms-btn { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; height: 38px; font-size: 14px; white-space: nowrap; }
 .ms-btn.active { border-color: var(--accent); color: var(--accent); }
 .ms-drop {
@@ -402,7 +405,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .kpi .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-.kpi .num { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .num { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .kpi.spend .num { color: var(--accent); }
 .kpi.income .num { color: var(--income); }
 .kpi .num.pos { color: var(--good); }
@@ -411,7 +414,7 @@ a.btn { display: inline-block; text-decoration: none; }
   .kpis { grid-template-columns: 1fr; gap: 8px; }
   .kpi { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 14px; }
   .kpi .lbl { margin: 0; }
-  .kpi .num { font-size: 20px; white-space: nowrap; }
+  .kpi .num { font-size: 16px; white-space: nowrap; }
 }
 
 .chart-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
@@ -516,16 +519,6 @@ a.btn { display: inline-block; text-decoration: none; }
 .fit-icon .tm-name, .fit-icon .tm-amt,
 .fit-pct .tm-ico, .fit-pct .tm-name, .fit-pct .tm-amt, .fit-none > * { display: none; }
 .tm-detail { margin: 10px 2px 0; font-size: 13px; line-height: 1.45; min-height: 19px; }
-
-.table-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-.table-wrap { overflow: auto; max-height: 480px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { position: sticky; top: 0; background: var(--panel2); color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; user-select: none; }
-th.sorted-asc::after { content: " \25B2"; font-size: 9px; color: var(--accent); }
-th.sorted-desc::after { content: " \25BC"; font-size: 9px; color: var(--accent); }
-td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
-.table-note { color: var(--muted); font-size: 12.5px; padding: 8px 12px; }
 
 /* ---------- settings ---------- */
 .screen-title { margin-bottom: 14px; }
