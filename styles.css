@@ -260,6 +260,21 @@ a.btn { display: inline-block; text-decoration: none; }
 .meta-tile .k { color: var(--muted); font-size: 11px; line-height: 1.2; }
 .meta-tile .v { max-width: 100%; font-size: 14px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta-tile select, .meta-tile input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+/* On, for a new entry or a recurring item: the right 15% is the ↻ Repeat button, the rest opens
+   the date picker. Blue once a repeat is set, with "Monthly" / "Yearly" under the date. The same
+   inset on both sides keeps the text centered on the whole tile, clear of the button. */
+.meta-tile.has-repeat { padding: 0 calc(15% + 4px); }
+.meta-tile.has-repeat input { width: 85%; }
+.repeat-btn {
+  position: absolute; top: 0; bottom: 0; right: 0; z-index: 1; width: 15%; padding: 0;
+  border: 0; border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; line-height: 1;
+}
+.income-mode .repeat-btn { background: var(--income); } /* green in Income, like its other highlights */
+.meta-tile .r { color: var(--accent); font-size: 11px; line-height: 1.2; }
+.income-mode .meta-tile .r { color: var(--income); }
+.repeat-seg { grid-column: 1 / -1; display: flex; }
+.repeat-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
 
 /* Note: three visible lines, below By · On · With. */
 .note-input { display: block; margin-top: 10px; resize: none; line-height: 1.4; font-family: inherit; font-size: 14px; background: var(--panel); }
@@ -417,13 +432,14 @@ a.btn { display: inline-block; text-decoration: none; }
 .bud-title { display: flex; align-items: baseline; gap: 8px; }
 .bud-title span { color: var(--muted); font-size: 12.5px; }
 .bud-empty { margin: 0; }
-/* One bar, two fills: gray up to an even pace for today (this month only), and the actual
-   spending in blue on top (red once over budget). */
+/* One bar: gray up to an even pace for today (this month only), the actual spending in blue on
+   top, and the part beyond that pace in the over-budget red (all red once over budget). */
 .bud-bar { position: relative; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
 .bud-bar.overall { height: 10px; border-radius: 5px; }
 .bud-bar span { position: absolute; top: 0; bottom: 0; left: 0; border-radius: inherit; }
 .bud-bar .pace { background: color-mix(in srgb, var(--muted) 45%, var(--panel2)); }
 .bud-bar .fill { background: var(--accent); }
+.bud-bar .ahead { background: var(--expense); border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .bud-bar.over .fill { background: var(--expense); }
 .bud-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 /* Name left, figures right; on a narrow phone long figures drop under the name instead of cutting it. */
@@ -436,6 +452,34 @@ a.btn { display: inline-block; text-decoration: none; }
 .bud-overall .bud-fig { color: var(--text); }
 .bud-none { display: flex; justify-content: space-between; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
 .bud-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* Recurring card (Budget tab): every recurring item for the month, by due date. */
+.rec-list { list-style: none; margin: 0; padding: 0; }
+.rec-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.rec-row:first-child { border-top: 0; padding-top: 2px; }
+.rec-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 22px; }
+.rec-line + .rec-line { margin-top: 4px; }
+.rec-name {
+  display: flex; align-items: baseline; gap: 6px; min-width: 0; padding: 0; border: 0; background: none;
+  color: var(--text); font-size: 14.5px; text-align: left;
+}
+.rec-name > span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-more { color: var(--muted); font-size: 11px; flex: none; } /* tap the name for Edit / Remove */
+.rec-amt { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; text-decoration: none; }
+.rec-row.expense .rec-amt { color: var(--expense); }
+.rec-row.income .rec-amt { color: var(--income); }
+.rec-details { margin-top: 2px; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-when { color: var(--muted); font-size: 12.5px; }
+.rec-row.overdue .rec-when { color: var(--expense); font-weight: 600; }
+.rec-row.due .rec-when { color: var(--text); font-weight: 600; }
+.rec-row.logged .rec-name, .rec-row.skipped .rec-name { color: var(--muted); }
+.rec-row.logged .rec-amt, .rec-row.skipped .rec-amt { color: var(--muted); font-weight: 400; }
+.rec-row.skipped .rec-amt { text-decoration: line-through; }
+.rec-actions { display: flex; gap: 6px; }
+.rec-actions .btn, .rec-menu .btn { padding: 6px 12px; }
+.rec-menu { display: flex; gap: 8px; margin-top: 8px; }
+.rec-left { display: flex; justify-content: space-between; gap: 10px; margin: 8px 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+.rec-left span:last-child { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
 
 /* The form that sets a month's budget. */
 .bud-sub { margin: 4px 0 12px; color: var(--muted); font-size: 13px; text-align: center; }
@@ -546,6 +590,12 @@ td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
 #tabbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); text-decoration: none; font-size: 11px; }
 #tabbar a svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #tabbar a.active { color: var(--accent); }
+#tabbar a { position: relative; }
+/* Budget tab: how many recurring items are due today or overdue. */
+.tab-badge {
+  position: absolute; top: 5px; left: calc(50% + 6px); min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 9px; background: var(--expense); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
+}
 
 #toast {
   position: fixed; left: 50%; transform: translateX(-50%); z-index: 70;

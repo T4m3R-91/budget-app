@@ -8,6 +8,7 @@ import { state, byId } from "./state.js";
 import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate } from "./ui.js";
 import { parseAmount } from "./numbers.js";
 import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate } from "./db.js";
+import { paintRecurring, refreshRecurring } from "./recurring.js";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const NOT_SET_UP = "Budgets aren't set up yet. Run budgets-migration.sql in Supabase to turn them on.";
@@ -66,7 +67,8 @@ export function showBudget() {
       el("div", { class: "dash-head" },
         el("h2", { text: "Budget" }),
         el("div", { id: "b-cur", class: "seg small", role: "group", "aria-label": "Show amounts in" })),
-      el("section", { class: "card budget-card", id: "b-card", "aria-label": "Budget" }));
+      el("section", { class: "card budget-card", id: "b-card", "aria-label": "Budget" }),
+      el("section", { class: "card budget-card", id: "r-card", "aria-label": "Recurring" }));
   }
   paintCurrency();
   card.month = card.next ?? monthOf(isoLocal());
@@ -74,6 +76,7 @@ export function showBudget() {
   card.data.clear(); // either of you may have changed a budget or logged spending since
   loadEarliest();
   loadCardMonth();
+  refreshRecurring();
 }
 
 // EGP/USD, shared with the Dashboard's switch. Budgets themselves are always EGP (see cardBody).
@@ -132,6 +135,7 @@ function paintCard() {
         el("button", { type: "button", class: "icon-btn", "aria-label": "Previous month", text: "‹", disabled: month <= earliest, onclick: () => go(-1) }),
         el("button", { type: "button", class: "icon-btn", "aria-label": "Next month", text: "›", disabled: month >= shiftMonth(now, 1), onclick: () => go(1) }))),
     ...cardBody(month, now, data));
+  paintRecurring(month); // the Recurring card follows the same month
 }
 
 function cardBody(month, now, data) {
@@ -196,12 +200,16 @@ function cardBody(month, now, data) {
 }
 
 // Blue up to the budget; full and red once over. pace (0–1) adds a gray fill underneath, up to an
-// even pace for today: gray showing past the blue is what an even pace would still allow by today;
-// blue covering it all means spending faster than that.
+// even pace for today: gray showing past the blue is what an even pace would still allow by today.
+// Spending beyond that pace (but still within budget) shows in the over-budget red.
 function bar(spent, budget, size = "", pace = null) {
+  const used = Math.min(100, (spent / budget) * 100);
+  const at = pace == null ? null : pace * 100;
+  const ahead = at != null && spent <= budget && used > at;
   return el("div", { class: `bud-bar ${size}${spent > budget ? " over" : ""}`, "aria-hidden": "true" },
-    pace == null ? null : el("span", { class: "pace", style: `width:${(pace * 100).toFixed(1)}%` }),
-    el("span", { class: "fill", style: `width:${Math.min(100, (spent / budget) * 100)}%` }));
+    at == null ? null : el("span", { class: "pace", style: `width:${at.toFixed(1)}%` }),
+    el("span", { class: "fill", style: `width:${used}%` }),
+    ahead ? el("span", { class: "ahead", style: `left:${at.toFixed(1)}%;width:${(used - at).toFixed(1)}%` }) : null);
 }
 
 // Share of this month gone by the end of today: the 15th of a 30-day month is 0.5.
