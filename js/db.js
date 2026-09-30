@@ -26,9 +26,13 @@ async function allPages(query) {
   }
 }
 
+// A table that doesn't exist yet: its migration hasn't been run.
+const isMissingTable = (e) => ["42P01", "PGRST205"].includes(e?.code);
+
 export async function reloadLists() {
   const lists = await cached("lists", async () => {
-    const results = await Promise.all([
+    const [receiving, ...results] = await Promise.all([
+      sb.from("receiving_methods").select("*").order("sort_order").order("name"),
       sb.from("members").select("email, display_name").order("display_name"),
       sb.from("categories").select("*").order("sort_order").order("name"),
       sb.from("subcategories").select("*").order("sort_order").order("name"),
@@ -36,7 +40,9 @@ export async function reloadLists() {
       sb.from("income_sources").select("*").order("sort_order").order("name"),
     ]);
     const [members, categories, subcategories, paymentMethods, incomeSources] = results.map(unwrap);
-    return { members, categories, subcategories, paymentMethods, incomeSources };
+    // null until receiving-methods-migration.sql has run: income then has no "In" tile.
+    const receivingMethods = isMissingTable(receiving.error) ? null : unwrap(receiving);
+    return { members, categories, subcategories, paymentMethods, incomeSources, receivingMethods };
   });
   Object.assign(state, lists);
 }

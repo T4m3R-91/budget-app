@@ -29,8 +29,10 @@ function render() {
           appearanceSection(),
           listSection({ title: "Categories", table: "categories", items: state.categories, withIcon: true, nested: true }),
           listSection({ title: "Payment methods", table: "payment_methods", items: state.paymentMethods }),
+          // The income "In" choices, once receiving-methods-migration.sql has run.
+          state.receivingMethods ? listSection({ title: "Receiving methods", table: "receiving_methods", items: state.receivingMethods }) : null,
           listSection({ title: "Income sources", table: "income_sources", items: state.incomeSources, withIcon: true }),
-        ]
+        ].filter(Boolean)
       : []));
   document.getElementById("rename-input")?.focus();
 }
