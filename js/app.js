@@ -3,7 +3,8 @@
 import { configured, sb, reloadLists } from "./db.js";
 import { state } from "./state.js";
 import { el, friendlyError, applyTheme } from "./ui.js";
-import { showAdd, showEdit } from "./entry.js";
+import { showAdd, showEdit, showRecurringLog, showRecurringEdit } from "./entry.js";
+import { refreshRecurring } from "./recurring.js";
 import { showHistory } from "./history.js";
 import { showDashboard } from "./dashboard.js";
 import { showProfile } from "./profile.js";
@@ -42,6 +43,17 @@ function route() {
   if (hash.startsWith("#budget/")) {
     showScreen("budgetform", "budget");
     showBudgetEditor(hash.slice(8));
+    return;
+  }
+  if (hash.startsWith("#log/")) { // a recurring item's due date, in the Add form to change first
+    const [itemId, due] = hash.slice(5).split("/");
+    showScreen("add", "budget");
+    showRecurringLog(itemId, due);
+    return;
+  }
+  if (hash.startsWith("#recurring/")) { // edit a recurring item
+    showScreen("add", "budget");
+    showRecurringEdit(hash.slice(11));
     return;
   }
   if (hash === "#settings") { // Settings now lives in Profile; old links and bookmarks land there
@@ -116,6 +128,7 @@ async function enterApp(session) {
   state.me = state.members.find((m) => m.email === email) || null;
   if (!state.me) return showNotMember(email);
   route();
+  refreshRecurring(); // the Budget tab's badge: recurring items due today or overdue
 }
 
 function syncOnline() {
@@ -126,7 +139,11 @@ async function boot() {
   // Auto theme: re-check the clock every minute and whenever the app comes back to the front.
   applyTheme();
   setInterval(applyTheme, 60_000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) applyTheme(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    applyTheme();
+    if (state.me) refreshRecurring(); // something may have come due, or been logged on the other phone
+  });
   syncOnline();
   window.addEventListener("online", syncOnline);
   window.addEventListener("offline", syncOnline);

@@ -1,13 +1,21 @@
 // The Add / Edit screen: amount + category are the only required inputs; everything else
 // is defaulted (date today, EGP, you, last payment method, live rate) and editable.
+// The same form also logs a recurring item's due date after changing it (#log/…), and edits a
+// recurring item itself (#recurring/…). The ↻ strip on the On tile makes a new entry repeat.
 
 import { state, byId, subcategoriesOf } from "./state.js";
-import { el, toast, fmtMoney, fmtRate, isoLocal, friendlyDate, relativeDay, friendlyError, partOfDay } from "./ui.js";
+import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, partOfDay } from "./ui.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate } from "./fx.js";
-import { insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction } from "./db.js";
+import {
+  insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
+  insertRecurring, updateRecurring, deleteRecurring, linkToRecurring,
+} from "./db.js";
 import { scanReceipt } from "./receipt.js";
 import { monthStatus, monthOf } from "./budget.js";
+import { refreshRecurring, recurringItem, recurringLabel, nextDue, ordinal, shortDate } from "./recurring.js";
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const $ = (id) => document.getElementById(id);
 const screen = () => $("screen-add");
@@ -42,7 +50,43 @@ function freshForm(type = "expense") {
     paymentMethodId: rememberedPayment(), who: state.me.email,
     date: isoLocal(), description: "",
     saving: false, confirmDelete: false,
+    repeat: null, repeatOpen: false, // null | "monthly" | "yearly"; repeatOpen shows its choices
+    recurring: null, // { item, due } while logging a recurring item's due date through the form
   };
+}
+
+// A recurring item's details as form fields.
+function fromItem(item) {
+  return {
+    amountText: String(Number(item.amount)), currency: item.currency,
+    categoryId: item.category_id, subcategoryId: item.subcategory_id, sourceId: item.income_source_id,
+    paymentMethodId: item.payment_method_id, who: item.who, description: item.description || "",
+  };
+}
+
+// #log/<item>/<due>: the item's due date in the form, to change before saving (earns the
+// recurring 5 points, and counts as that occurrence logged).
+export async function showRecurringLog(itemId, due) {
+  const item = /^\d{4}-\d{2}-\d{2}$/.test(due) ? await recurringItem(itemId) : null;
+  if (!item) {
+    location.hash = "#budget";
+    return;
+  }
+  f = { ...freshForm(item.type), ...fromItem(item), date: due, recurring: { item, due } };
+  render();
+  ensureRate();
+  loadBudgetTiles();
+}
+
+// #recurring/<item>: edits the item itself. Changes apply from its next due date on.
+export async function showRecurringEdit(itemId) {
+  const item = await recurringItem(itemId);
+  if (!item) {
+    location.hash = "#budget";
+    return;
+  }
+  f = { ...freshForm(item.type), ...fromItem(item), mode: "recur", item, date: nextDue(item), repeat: item.frequency };
+  render();
 }
 
 export function showAdd() {
@@ -156,14 +200,15 @@ function render() {
   commitRateEdit = null;
   r.classList.toggle("income-mode", income);
 
+  // Leaving a recurring form drops it, so the Add tab starts fresh next time.
+  const backToBudget = () => el("a", { class: "link-btn", href: "#budget", text: "Cancel", onclick: () => { f = null; } });
+  const titled = (back, title) => el("div", { class: "entry-head" }, back, el("h2", { text: title }), el("span"));
   const head =
-    f.mode === "edit"
-      ? el("div", { class: "entry-head" },
-          el("a", { class: "link-btn", href: "#history", text: "Cancel" }),
-          el("h2", { text: income ? "Edit income" : "Edit expense" }),
-          el("span"))
-      : el("div", { class: "entry-head centered" }, typeSeg());
-  const greeting = f.mode === "add"
+    f.mode === "edit" ? titled(el("a", { class: "link-btn", href: "#history", text: "Cancel" }), income ? "Edit income" : "Edit expense")
+    : f.mode === "recur" ? titled(backToBudget(), "Edit recurring")
+    : f.recurring ? titled(backToBudget(), `Log ${recurringLabel(f.recurring.item)}`)
+    : el("div", { class: "entry-head centered" }, typeSeg());
+  const greeting = f.mode === "add" && !f.recurring
     ? el("div", { class: "greeting" }, el("p", { text: GREETING[partOfDay()] }), el("h2", { text: state.me.display_name }))
     : null;
 
@@ -183,7 +228,7 @@ function render() {
       el("span", { id: "e-amount-cur", class: "amount-cur" })),
     el("span", { id: "e-converted", class: "converted", "aria-live": "polite" }));
 
-  const amountRow = f.mode === "add"
+  const amountRow = f.mode === "add" && !f.recurring
     ? el("div", { class: "amount-row" },
         amountBox,
         el("span", { class: "or", text: "or" }),
@@ -257,6 +302,7 @@ function renderRate() {
   const box = $("e-rate");
   if (!box) return;
   commitRateEdit = null;
+  if (f.mode === "recur") return box.replaceChildren(); // a recurring item takes the rate on the day it's logged
 
   if (f.editingRate) {
     const input = el("input", {
@@ -393,22 +439,7 @@ function renderMeta() {
   const tiles = [
     metaTile("By", people.find((p) => p.value === f.who)?.label ?? "—",
       selectControl(income ? "Received by" : "Paid by", people, f.who, (v) => { f.who = v; renderMeta(); })),
-    metaTile("On", friendlyDate(f.date),
-      el("input", {
-        type: "date", "aria-label": "Date", value: f.date,
-        onchange: (e) => {
-          if (!e.target.value) return;
-          const monthChanged = monthOf(e.target.value) !== monthOf(f.date);
-          f.date = e.target.value;
-          renderMeta();
-          if (monthChanged) { renderGrid(); loadBudgetTiles(); } // the tiles show that month's budget
-        },
-        // With a mouse, a click on the (invisible) field doesn't open the calendar by itself.
-        onclick: (e) => {
-          if (!window.matchMedia("(pointer: fine)").matches) return;
-          try { e.currentTarget.showPicker(); } catch { /* older browsers: the field still takes typing */ }
-        },
-      })),
+    onTile(),
   ];
   if (!income) {
     const payments = [{ value: "", label: "Not set" }, ...state.paymentMethods
@@ -418,14 +449,72 @@ function renderMeta() {
     tiles.push(metaTile("With", payments.find((p) => p.value === current)?.label ?? "Not set",
       selectControl("Paid with", payments, current, (v) => { f.paymentMethodId = v || null; renderMeta(); })));
   }
+  if (canRepeat() && f.repeatOpen) tiles.push(repeatChoices());
   $("e-meta").replaceChildren(...tiles);
+}
+
+// A new entry can be set to repeat, and a recurring item's schedule edited; not while editing an
+// entry, or logging a recurring item's due date.
+const canRepeat = () => (f.mode === "add" && !f.recurring) || f.mode === "recur";
+
+// On: tapping the tile opens the date picker; its right 15% is the ↻ Repeat button.
+function onTile() {
+  const repeat = canRepeat();
+  const date = el("input", {
+    type: "date", "aria-label": "Date", value: f.date,
+    onchange: (e) => {
+      if (!e.target.value) return;
+      const monthChanged = monthOf(e.target.value) !== monthOf(f.date);
+      f.date = e.target.value;
+      renderMeta();
+      if (monthChanged) { renderGrid(); loadBudgetTiles(); } // the tiles show that month's budget
+    },
+    // With a mouse, a click on the (invisible) field doesn't open the calendar by itself.
+    onclick: (e) => {
+      if (!window.matchMedia("(pointer: fine)").matches) return;
+      try { e.currentTarget.showPicker(); } catch { /* older browsers: the field still takes typing */ }
+    },
+  });
+  return el("label", { class: "meta-tile" + (repeat ? " has-repeat" : "") },
+    repeat
+      ? el("button", {
+          type: "button", class: "repeat-btn" + (f.repeat ? " on" : ""), "aria-expanded": String(f.repeatOpen),
+          "aria-label": f.repeat ? `Repeats ${f.repeat}. Change` : "Repeat this entry",
+          onclick: (e) => { e.preventDefault(); e.stopPropagation(); f.repeatOpen = !f.repeatOpen; renderMeta(); },
+        }, "↻")
+      : null,
+    el("span", { class: "k", text: "On" }),
+    el("span", { class: "v", text: friendlyDate(f.date) }),
+    f.repeat ? el("span", { class: "r", text: f.repeat === "monthly" ? "Monthly" : "Yearly" }) : null,
+    date);
+}
+
+// Never · Monthly on the 1st · Yearly on 1 Oct, from the entry's date. A recurring item being
+// edited can't be set to Never; "Stop repeating" on the Budget tab ends it.
+function repeatChoices() {
+  const d = parseISODate(f.date);
+  const choices = [
+    ...(f.mode === "recur" ? [] : [[null, "Never"]]),
+    ["monthly", `Monthly on the ${ordinal(d.getDate())}`],
+    ["yearly", `Yearly on ${d.getDate()} ${MONTHS[d.getMonth()]}`],
+  ];
+  return el("div", { class: "seg small repeat-seg", role: "group", "aria-label": "Repeat" },
+    choices.map(([value, label]) =>
+      el("button", {
+        type: "button", class: (f.repeat === value ? "active" : "") + (f.type === "income" ? " is-income" : ""),
+        "aria-pressed": String(f.repeat === value), text: label,
+        onclick: () => { f.repeat = value; f.repeatOpen = false; renderMeta(); },
+      })));
 }
 
 function renderSaveButton() {
   const button = $("e-save");
   if (!button) return;
   button.disabled = f.saving;
-  button.textContent = f.saving ? "Saving…" : f.mode === "edit" ? "Save changes" : f.type === "income" ? "Save income" : "Save expense";
+  button.textContent = f.saving ? "Saving…"
+    : f.mode === "edit" || f.mode === "recur" ? "Save changes"
+    : f.recurring ? `Log ${f.type}`
+    : f.type === "income" ? "Save income" : "Save expense";
 }
 
 // ---------- missing required fields ----------
@@ -434,7 +523,7 @@ function missingFields() {
   const missing = [];
   if (parseAmount(f.amountText) == null) missing.push("amount");
   if (f.type === "expense" ? !f.categoryId : !f.sourceId) missing.push("grid");
-  if (!(f.rate > 0) && !f.rateLoading) missing.push("rate");
+  if (f.mode !== "recur" && !(f.rate > 0) && !f.rateLoading) missing.push("rate");
   return missing;
 }
 
@@ -498,6 +587,14 @@ async function save_() {
     description: form.description.trim() || null,
   };
 
+  // A recurring item's schedule, from the entry's date: monthly on its day, or yearly on its date.
+  const d = parseISODate(form.date);
+  const schedule = (repeat) => ({ frequency: repeat, day: d.getDate(), month: repeat === "yearly" ? d.getMonth() + 1 : null });
+  const itemFields = () => {
+    const { rate, rate_source, occurred_on, ...fields } = row; // an item takes the rate on the day it's logged
+    return { ...fields, ...schedule(form.repeat) };
+  };
+
   form.saving = true;
   renderSaveButton();
   try {
@@ -508,16 +605,43 @@ async function save_() {
       location.hash = "#history";
       return;
     }
+    if (form.mode === "recur") {
+      await updateRecurring(form.item.id, itemFields());
+      f = null;
+      toast(`${recurringLabel({ ...form.item, ...itemFields() })} updated, from ${shortDate(form.date)} on`);
+      location.hash = "#budget";
+      return;
+    }
+    if (form.recurring) Object.assign(row, { recurring_id: form.recurring.item.id, recurring_due_on: form.recurring.due });
     const saved = await insertTransaction(row);
     if (row.payment_method_id) {
       try { localStorage.setItem(lastPaymentKey(), row.payment_method_id); } catch { /* storage unavailable */ }
     }
+    // Set to repeat: the item starts with this entry as its first occurrence.
+    let repeatNote = "";
+    let itemId = null;
+    if (form.repeat) {
+      try {
+        const item = await insertRecurring({ ...itemFields(), starts_on: form.date });
+        itemId = item.id;
+        await linkToRecurring(saved.id, item.id, form.date);
+        repeatNote = ` · repeats ${form.repeat}`;
+      } catch (e) {
+        repeatNote = ` · couldn't set it to repeat (${friendlyError(e)})`;
+      }
+    }
     // Points are scored by the database; `points` is absent until points-migration.sql has run.
     const earned = Number.isInteger(saved.points) ? saved.points : null;
-    toast(`Saved ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency, { code: true })}${earned ? ` · +${earned} pts` : ""}`, {
+    toast(`${form.recurring ? "Logged" : "Saved"} ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency, { code: true })}${earned ? ` · +${earned} pts` : ""}${repeatNote}`, {
       label: "Undo",
-      run: () => undo(saved.id, earned),
+      run: () => undo(saved.id, earned, itemId),
     });
+    refreshRecurring(); // a hand-typed entry may match a due item; the badge follows
+    if (form.recurring) {
+      f = null;
+      location.hash = "#budget";
+      return;
+    }
     // Count it on its category tile right away; the refetch below catches anyone else's entries.
     if (expense && budgetTiles?.month === monthOf(row.occurred_on)) {
       budgetTiles.spent.set(row.category_id, (budgetTiles.spent.get(row.category_id) || 0) + Number(saved.amount_egp));
@@ -537,11 +661,14 @@ async function save_() {
   }
 }
 
-async function undo(id, points) {
+// itemId: the recurring item this save set up; undoing the entry undoes the repeat too.
+async function undo(id, points, itemId = null) {
   try {
     await deleteTransaction(id);
+    if (itemId) await deleteRecurring(itemId);
     toast(points ? `Entry removed · −${points} pts` : "Entry removed");
     loadBudgetTiles();
+    refreshRecurring();
   } catch (e) {
     toast(friendlyError(e));
   }

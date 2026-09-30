@@ -95,6 +95,61 @@ export async function fetchExpensesBetween(first, end) {
   }
 }
 
+// ---------- recurring items (see recurring-migration.sql) ----------
+
+async function allPages(query) {
+  const size = 1000;
+  const all = [];
+  for (let from = 0; ; from += size) {
+    const page = unwrap(await query().range(from, from + size - 1));
+    all.push(...page);
+    if (page.length < size) return all;
+  }
+}
+
+// { items, skips: [{ item_id, due_on }], links: [{ id, recurring_id, recurring_due_on, amount, currency }] }:
+// the recurring items, the occurrences skipped, and the entries logged from them.
+export async function fetchRecurring() {
+  const [items, skips, links] = await Promise.all([
+    sb.from("recurring_items").select("*").order("created_at"),
+    sb.from("recurring_skips").select("item_id, due_on"),
+    allPages(() => sb.from("transactions").select("id, recurring_id, recurring_due_on, amount, currency").not("recurring_id", "is", null).order("id")),
+  ]);
+  return { items: unwrap(items), skips: unwrap(skips), links };
+}
+
+export async function insertRecurring(row) {
+  return unwrap(await sb.from("recurring_items").insert(row).select().single());
+}
+
+export async function updateRecurring(id, patch) {
+  unwrap(await sb.from("recurring_items").update(patch).eq("id", id));
+}
+
+export async function deleteRecurring(id) {
+  unwrap(await sb.from("recurring_items").delete().eq("id", id));
+}
+
+export async function skipOccurrence(itemId, dueOn) {
+  unwrap(await sb.from("recurring_skips").insert({ item_id: itemId, due_on: dueOn }));
+}
+
+export async function unskipOccurrence(itemId, dueOn) {
+  unwrap(await sb.from("recurring_skips").delete().eq("item_id", itemId).eq("due_on", dueOn));
+}
+
+// Marks an entry as a recurring item's occurrence (used for the entry that set the item up).
+export async function linkToRecurring(transactionId, itemId, dueOn) {
+  unwrap(await sb.from("transactions").update({ recurring_id: itemId, recurring_due_on: dueOn }).eq("id", transactionId));
+}
+
+// Entries typed by hand (not logged from an item) dated first <= day < end, for matching them to
+// due items: [{ id, type, category_id, income_source_id, currency, amount, occurred_on }].
+export async function fetchUnlinkedBetween(first, end) {
+  return allPages(() => sb.from("transactions").select("id, type, category_id, income_source_id, currency, amount, occurred_on")
+    .is("recurring_id", null).gte("occurred_on", first).lt("occurred_on", end).order("id"));
+}
+
 // The date of the earliest entry ("2026-07-01"), or null when there are none yet.
 export async function firstEntryDate() {
   const row = unwrap(await sb.from("transactions").select("occurred_on").order("occurred_on").limit(1).maybeSingle());
