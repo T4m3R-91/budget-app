@@ -75,12 +75,17 @@ export function toast(message, action) {
   toastTimer = setTimeout(hide, action ? 6000 : 3200);
 }
 
+// The request never reached the server (no signal, or the server is unreachable), as opposed to
+// the server answering with an error.
+export function isNetworkError(e) {
+  const msg = String(e?.message || e || "");
+  return !navigator.onLine || /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(msg);
+}
+
 export function friendlyError(e) {
   const msg = String(e?.message || e || "");
   if (e?.code === "23505") return "That name is already in the list.";
-  if (/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(msg)) {
-    return "Couldn't reach the server. Check your connection and try again.";
-  }
+  if (isNetworkError(e)) return "Couldn't reach the server. Check your connection and try again.";
   if (/jwt expired|invalid jwt|refresh token/i.test(msg)) return "Your session expired. Sign out and back in.";
   return msg || "Something went wrong. Please try again.";
 }
@@ -133,6 +138,8 @@ export function loadScript(src) {
   if (!scripts.has(src)) {
     scripts.set(src, new Promise((resolve, reject) => {
       const s = document.createElement("script");
+      // jsdelivr allows CORS: a plain copy is cheaper for the offline cache (sw.js) to keep.
+      if (src.startsWith("https://cdn.jsdelivr.net/")) s.crossOrigin = "anonymous";
       s.src = src;
       s.onload = resolve;
       s.onerror = () => {
@@ -148,6 +155,6 @@ export function loadScript(src) {
 // Goes in before styles.css, so the app's own look wins over a library's defaults.
 export function loadStyle(href) {
   if (document.querySelector(`link[href="${href}"]`)) return;
-  const link = el("link", { rel: "stylesheet", href });
+  const link = el("link", { rel: "stylesheet", href, crossorigin: href.startsWith("https://cdn.jsdelivr.net/") ? "anonymous" : null });
   document.head.insertBefore(link, document.querySelector('link[href="styles.css"]'));
 }

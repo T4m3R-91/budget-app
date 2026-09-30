@@ -4,7 +4,8 @@
 // recurring item itself (#recurring/…). The ↻ strip on the On tile makes a new entry repeat.
 
 import { state, byId, subcategoriesOf } from "./state.js";
-import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, partOfDay } from "./ui.js";
+import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
+import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate } from "./fx.js";
 import {
@@ -133,6 +134,11 @@ function tileBudget(categoryId) {
 }
 
 export async function showEdit(id) {
+  if (!navigator.onLine) { // edits and deletes need the server
+    toast("Editing needs a connection. Try again when you're online.");
+    location.hash = "#history";
+    return;
+  }
   f = null;
   screen().replaceChildren(el("p", { class: "muted", text: "Loading…" }));
   let t = null;
@@ -166,7 +172,7 @@ async function ensureRate({ force = false } = {}) {
   form.rateLoading = true;
   renderRate();
 
-  const live = navigator.onLine ? await getLiveRate({ force }) : null;
+  const live = await getLiveRate({ force }); // offline: the last one fetched, if any
   if (form !== f || userSet()) return;
 
   if (live) {
@@ -562,17 +568,18 @@ async function save_() {
     renderConverted();
   }
   const missing = missingFields();
-  if (missing.length) {
-    flag(missing);
-    if (!navigator.onLine) toast("You're offline. Connect to the internet to save.");
-    return;
-  }
+  if (missing.length) return flag(missing);
   if (f.rateLoading && !(f.rate > 0)) return toast("Getting today's exchange rate. Try again in a moment.");
-  if (!navigator.onLine) return toast("You're offline. Connect to the internet to save.");
+  // Offline, only new entries can be saved (they wait on the phone); changes need a connection.
+  if (!navigator.onLine && (f.mode === "edit" || f.mode === "recur")) return toast("Saving changes needs a connection. Try again when you're online.");
+  if (!navigator.onLine && f.repeat) return toast("Setting a repeat needs a connection. Set Repeat to Never to save it on this phone now.");
 
   const form = f;
   const expense = form.type === "expense";
   const row = {
+    // New entries get their id here, so one sent twice (a retry after a lost reply, or from the
+    // offline outbox) is still saved once.
+    ...(form.mode === "add" ? { id: crypto.randomUUID() } : {}),
     type: form.type,
     occurred_on: form.date,
     amount: parseAmount(form.amountText),
@@ -591,7 +598,8 @@ async function save_() {
   const d = parseISODate(form.date);
   const schedule = (repeat) => ({ frequency: repeat, day: d.getDate(), month: repeat === "yearly" ? d.getMonth() + 1 : null });
   const itemFields = () => {
-    const { rate, rate_source, occurred_on, ...fields } = row; // an item takes the rate on the day it's logged
+    // Not the entry's own id or date; and an item takes the rate on the day it's logged.
+    const { id, rate, rate_source, occurred_on, recurring_id, recurring_due_on, ...fields } = row;
     return { ...fields, ...schedule(form.repeat) };
   };
 
@@ -613,10 +621,11 @@ async function save_() {
       return;
     }
     if (form.recurring) Object.assign(row, { recurring_id: form.recurring.item.id, recurring_due_on: form.recurring.due });
-    const saved = await insertTransaction(row);
     if (row.payment_method_id) {
       try { localStorage.setItem(lastPaymentKey(), row.payment_method_id); } catch { /* storage unavailable */ }
     }
+    if (!navigator.onLine) return await saveOffline(form, row);
+    const saved = await insertTransaction(row);
     // Set to repeat: the item starts with this entry as its first occurrence.
     let repeatNote = "";
     let itemId = null;
@@ -637,28 +646,58 @@ async function save_() {
       run: () => undo(saved.id, earned, itemId),
     });
     refreshRecurring(); // a hand-typed entry may match a due item; the badge follows
-    if (form.recurring) {
-      f = null;
-      location.hash = "#budget";
-      return;
-    }
-    // Count it on its category tile right away; the refetch below catches anyone else's entries.
-    if (expense && budgetTiles?.month === monthOf(row.occurred_on)) {
-      budgetTiles.spent.set(row.category_id, (budgetTiles.spent.get(row.category_id) || 0) + Number(saved.amount_egp));
-      budgetTiles.spentUsd.set(row.category_id, (budgetTiles.spentUsd.get(row.category_id) || 0) + Number(saved.amount_usd));
-    }
-    const keepLive = form.rateSource === "live";
-    f = freshForm(form.type);
-    if (keepLive) Object.assign(f, { rate: form.rate, rateSource: "live", rateNote: form.rateNote });
-    render();
-    document.querySelector("main").scrollTop = 0;
-    if (!keepLive) ensureRate();
-    loadBudgetTiles();
+    syncOutbox(); // clearly online: send anything still waiting on the phone
+    afterSave(form, row);
   } catch (e) {
+    // The connection dropped mid-save: keep it on the phone (its id stops a double save if it
+    // did get through). A repeat can't be set up without the server.
+    if (form.mode === "add" && isNetworkError(e)) return saveOffline(form, row, Boolean(form.repeat));
     form.saving = false;
     if (form === f) renderSaveButton();
     toast(friendlyError(e));
   }
+}
+
+// No connection: the entry waits on the phone and syncs when you're back online.
+async function saveOffline(form, row, repeatDropped = false) {
+  try {
+    await queueEntry(row);
+  } catch (e) {
+    form.saving = false;
+    if (form === f) renderSaveButton();
+    return toast(`Couldn't keep it on this phone either. ${friendlyError(e)}`);
+  }
+  const what = `${nameOf(row) || ""} · ${fmtMoney(row.amount, row.currency, { code: true })}`;
+  toast(`Saved on this phone · ${what} · syncs when you're online${repeatDropped ? " · set the repeat once online" : ""}`, {
+    label: "Undo",
+    run: async () => { await removePending(row.id); toast("Entry removed"); },
+  });
+  afterSave(form, row);
+}
+
+// After a save (online or on the phone): back to the Budget tab if it was a recurring item's due
+// date, otherwise a fresh form for the next entry.
+function afterSave(form, row) {
+  if (form.recurring) {
+    f = null;
+    location.hash = "#budget";
+    return;
+  }
+  // Count it on its category tile right away; the refetch below catches anyone else's entries.
+  if (row.type === "expense" && budgetTiles?.month === monthOf(row.occurred_on)) {
+    const usd = row.currency === "USD";
+    const egp = usd ? round2(row.amount * row.rate) : row.amount;
+    const inUsd = usd ? row.amount : round2(row.amount / row.rate);
+    budgetTiles.spent.set(row.category_id, (budgetTiles.spent.get(row.category_id) || 0) + egp);
+    budgetTiles.spentUsd.set(row.category_id, (budgetTiles.spentUsd.get(row.category_id) || 0) + inUsd);
+  }
+  const keepLive = form.rateSource === "live";
+  f = freshForm(form.type);
+  if (keepLive) Object.assign(f, { rate: form.rate, rateSource: "live", rateNote: form.rateNote });
+  render();
+  document.querySelector("main").scrollTop = 0;
+  if (!keepLive) ensureRate();
+  if (navigator.onLine) loadBudgetTiles();
 }
 
 // itemId: the recurring item this save set up; undoing the entry undoes the repeat too.

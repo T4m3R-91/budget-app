@@ -1,8 +1,11 @@
 // Everything that talks to Supabase. Access rules live in the database (see supabase-setup.sql).
+// Reads go through cached(): each result is kept on the phone and used when offline (offline.js).
+// Writes need a connection, except new entries, which wait in the outbox (outbox.js).
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
 import { state } from "./state.js";
+import { cached } from "./offline.js";
 
 export const configured = Boolean(SUPABASE_URL && SUPABASE_KEY);
 export const sb = configured ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
@@ -12,41 +15,43 @@ function unwrap({ data, error }) {
   return data;
 }
 
-export async function reloadLists() {
-  const results = await Promise.all([
-    sb.from("members").select("email, display_name").order("display_name"),
-    sb.from("categories").select("*").order("sort_order").order("name"),
-    sb.from("subcategories").select("*").order("sort_order").order("name"),
-    sb.from("payment_methods").select("*").order("sort_order").order("name"),
-    sb.from("income_sources").select("*").order("sort_order").order("name"),
-  ]);
-  const [members, categories, subcategories, paymentMethods, incomeSources] = results.map(unwrap);
-  Object.assign(state, { members, categories, subcategories, paymentMethods, incomeSources });
-}
-
-const newestFirst = (q) => q.order("occurred_on", { ascending: false }).order("created_at", { ascending: false });
-
 // Supabase returns at most 1000 rows per request, so page through.
-export async function fetchAllTransactions() {
+async function allPages(query) {
   const size = 1000;
   const all = [];
   for (let from = 0; ; from += size) {
-    const page = unwrap(await newestFirst(sb.from("transactions").select("*")).range(from, from + size - 1));
+    const page = unwrap(await query().range(from, from + size - 1));
     all.push(...page);
     if (page.length < size) return all;
   }
 }
 
-export async function fetchTransactionsPage(offset, limit, type) {
-  let q = newestFirst(sb.from("transactions").select("*")).range(offset, offset + limit - 1);
-  if (type !== "all") q = q.eq("type", type);
-  return unwrap(await q);
+export async function reloadLists() {
+  const lists = await cached("lists", async () => {
+    const results = await Promise.all([
+      sb.from("members").select("email, display_name").order("display_name"),
+      sb.from("categories").select("*").order("sort_order").order("name"),
+      sb.from("subcategories").select("*").order("sort_order").order("name"),
+      sb.from("payment_methods").select("*").order("sort_order").order("name"),
+      sb.from("income_sources").select("*").order("sort_order").order("name"),
+    ]);
+    const [members, categories, subcategories, paymentMethods, incomeSources] = results.map(unwrap);
+    return { members, categories, subcategories, paymentMethods, incomeSources };
+  });
+  Object.assign(state, lists);
+}
+
+const newestFirst = (q) => q.order("occurred_on", { ascending: false }).order("created_at", { ascending: false });
+
+export function fetchAllTransactions() {
+  return cached("transactions", () => allPages(() => newestFirst(sb.from("transactions").select("*"))));
 }
 
 export async function fetchTransaction(id) {
   return unwrap(await sb.from("transactions").select("*").eq("id", id).maybeSingle());
 }
 
+// row may carry its own id (new entries do), so a retry after a lost reply can't save it twice.
 export async function insertTransaction(row) {
   return unwrap(await sb.from("transactions").insert(row).select().single());
 }
@@ -59,22 +64,22 @@ export async function deleteTransaction(id) {
   unwrap(await sb.from("transactions").delete().eq("id", id));
 }
 
-export async function latestEntryRate() {
-  return unwrap(
+export function latestEntryRate() {
+  return cached("latest-rate", async () => unwrap(
     await sb.from("transactions").select("rate, occurred_on").order("created_at", { ascending: false }).limit(1).maybeSingle()
-  );
+  ));
 }
 
 // [{ email, display_name, all_time, this_month }], one row per household member.
-export async function fetchLeaderboard() {
-  return unwrap(await sb.from("points_leaderboard").select("*"));
+export function fetchLeaderboard() {
+  return cached("leaderboard", async () => unwrap(await sb.from("points_leaderboard").select("*")));
 }
 
 // ---------- monthly budgets (see budgets-migration.sql) ----------
 
 // [{ category_id, amount_egp }] for one month; month is its 1st day, e.g. "2026-10-01".
-export async function fetchBudget(month) {
-  return unwrap(await sb.from("budgets").select("category_id, amount_egp").eq("month", month));
+export function fetchBudget(month) {
+  return cached(`budget:${month}`, async () => unwrap(await sb.from("budgets").select("category_id, amount_egp").eq("month", month)));
 }
 
 // Replaces a month's whole budget at once. items: [{ category_id, amount_egp }]; [] clears it.
@@ -84,38 +89,33 @@ export async function saveBudget(month, items) {
 
 // Just what budgets need from expenses dated first <= day < end:
 // [{ category_id, occurred_on, amount_egp, amount_usd }].
-export async function fetchExpensesBetween(first, end) {
-  const size = 1000;
-  const all = [];
-  for (let from = 0; ; from += size) {
-    const page = unwrap(await sb.from("transactions").select("category_id, occurred_on, amount_egp, amount_usd")
-      .eq("type", "expense").gte("occurred_on", first).lt("occurred_on", end).order("id").range(from, from + size - 1));
-    all.push(...page);
-    if (page.length < size) return all;
-  }
+export function fetchExpensesBetween(first, end) {
+  return cached(`expenses:${first}:${end}`, () => allPages(() => sb.from("transactions")
+    .select("category_id, occurred_on, amount_egp, amount_usd")
+    .eq("type", "expense").gte("occurred_on", first).lt("occurred_on", end).order("id")));
+}
+
+// The date of the earliest entry ("2026-07-01"), or null when there are none yet.
+export function firstEntryDate() {
+  return cached("first-entry", async () => {
+    const row = unwrap(await sb.from("transactions").select("occurred_on").order("occurred_on").limit(1).maybeSingle());
+    return row?.occurred_on ?? null;
+  });
 }
 
 // ---------- recurring items (see recurring-migration.sql) ----------
 
-async function allPages(query) {
-  const size = 1000;
-  const all = [];
-  for (let from = 0; ; from += size) {
-    const page = unwrap(await query().range(from, from + size - 1));
-    all.push(...page);
-    if (page.length < size) return all;
-  }
-}
-
 // { items, skips: [{ item_id, due_on }], links: [{ id, recurring_id, recurring_due_on, amount, currency }] }:
 // the recurring items, the occurrences skipped, and the entries logged from them.
-export async function fetchRecurring() {
-  const [items, skips, links] = await Promise.all([
-    sb.from("recurring_items").select("*").order("created_at"),
-    sb.from("recurring_skips").select("item_id, due_on"),
-    allPages(() => sb.from("transactions").select("id, recurring_id, recurring_due_on, amount, currency").not("recurring_id", "is", null).order("id")),
-  ]);
-  return { items: unwrap(items), skips: unwrap(skips), links };
+export function fetchRecurring() {
+  return cached("recurring", async () => {
+    const [items, skips, links] = await Promise.all([
+      sb.from("recurring_items").select("*").order("created_at"),
+      sb.from("recurring_skips").select("item_id, due_on"),
+      allPages(() => sb.from("transactions").select("id, recurring_id, recurring_due_on, amount, currency").not("recurring_id", "is", null).order("id")),
+    ]);
+    return { items: unwrap(items), skips: unwrap(skips), links };
+  });
 }
 
 export async function insertRecurring(row) {
@@ -145,16 +145,13 @@ export async function linkToRecurring(transactionId, itemId, dueOn) {
 
 // Entries typed by hand (not logged from an item) dated first <= day < end, for matching them to
 // due items: [{ id, type, category_id, income_source_id, currency, amount, occurred_on }].
-export async function fetchUnlinkedBetween(first, end) {
-  return allPages(() => sb.from("transactions").select("id, type, category_id, income_source_id, currency, amount, occurred_on")
-    .is("recurring_id", null).gte("occurred_on", first).lt("occurred_on", end).order("id"));
+export function fetchUnlinkedBetween(first, end) {
+  return cached(`unlinked:${first}:${end}`, () => allPages(() => sb.from("transactions")
+    .select("id, type, category_id, income_source_id, currency, amount, occurred_on")
+    .is("recurring_id", null).gte("occurred_on", first).lt("occurred_on", end).order("id")));
 }
 
-// The date of the earliest entry ("2026-07-01"), or null when there are none yet.
-export async function firstEntryDate() {
-  const row = unwrap(await sb.from("transactions").select("occurred_on").order("occurred_on").limit(1).maybeSingle());
-  return row?.occurred_on ?? null;
-}
+// ---------- the household's lists ----------
 
 export async function insertListItem(table, row) {
   return unwrap(await sb.from(table).insert(row).select().single());

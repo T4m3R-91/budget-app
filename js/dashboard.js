@@ -6,7 +6,7 @@ import { el, fmtMoney, friendlyError, loadScript, isoLocal, parseISODate } from 
 import { fetchAllTransactions } from "./db.js";
 import { filters, mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 
-const CHART_JS = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
+export const CHART_JS = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const COLOR = {}; // chart colors, read from the Day/Night theme's CSS tokens on each render
 const RANGES = [["1m", "1M"], ["1y", "1Y"], ["max", "Max"]];

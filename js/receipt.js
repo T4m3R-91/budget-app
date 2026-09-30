@@ -1,12 +1,30 @@
 // Reads a receipt photo on the phone itself (Tesseract OCR); the photo never leaves the device.
-// Tesseract and its English + Arabic language data download on first use, then the browser caches them.
+// The reader and its English + Arabic language data (about 15 MB) are downloaded once, while
+// online, by prepareReceiptReader(); after that scanning works without a connection. The
+// language data is kept by Tesseract on the phone; the rest by the app's offline copy (sw.js).
 
 import { loadScript } from "./ui.js";
 import { findAmountCandidates } from "./receipt-parse.js";
 
-const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"; // exact version: kept as is
+const READY_KEY = "receiptReaderReady";
+const READY = "5.1.1 eng+ara";
 
 let workerPromise = null;
+
+// Downloads everything scanning needs, once, in the background while online, so the first scan
+// can happen offline. Does nothing if it's already been done.
+export async function prepareReceiptReader() {
+  try {
+    if (localStorage.getItem(READY_KEY) === READY || !navigator.onLine) return;
+  } catch { return; }
+  try {
+    const worker = await getWorker();
+    await worker.terminate(); // free the memory; the files stay on the phone
+    workerPromise = null;
+    localStorage.setItem(READY_KEY, READY);
+  } catch { /* try again next time the app opens online */ }
+}
 let reportProgress = () => {};
 
 function describe(message) {
