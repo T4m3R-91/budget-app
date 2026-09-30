@@ -174,12 +174,14 @@ function cardBody(month, now, data) {
     if (inUsd) return over ? `${usd(((sp.egp - bu) / sp.egp) * sp.usd)} over` : pct(sp.egp, bu);
     return `${egp(sp.egp)} / ${plain(bu)} · ${over ? `${egp(sp.egp - bu)} over` : pct(sp.egp, bu)}`;
   };
+  // This month only: how far through the month today is, marked on every bar (an even pace).
+  const pace = month === now ? paceToday() : null;
   const row = (label, sp, bu, size) =>
     el("li", { class: `bud-row${size ? ` bud-${size}` : ""}${sp.egp > bu ? " over" : ""}` },
       el("div", { class: "bud-line" },
         el("span", { class: "bud-name", text: label }),
         el("span", { class: "bud-fig", text: figures(sp, bu) })),
-      bar(sp.egp, bu, size));
+      bar(sp.egp, bu, size, pace));
 
   return [
     el("ul", { class: "bud-list" },
@@ -193,10 +195,19 @@ function cardBody(month, now, data) {
   ].filter(Boolean);
 }
 
-// Blue up to the budget; full and red once over.
-function bar(spent, budget, size = "") {
+// Blue up to the budget; full and red once over. pace (0–1) adds a gray fill underneath, up to an
+// even pace for today: gray showing past the blue is what an even pace would still allow by today;
+// blue covering it all means spending faster than that.
+function bar(spent, budget, size = "", pace = null) {
   return el("div", { class: `bud-bar ${size}${spent > budget ? " over" : ""}`, "aria-hidden": "true" },
-    el("span", { style: `width:${Math.min(100, (spent / budget) * 100)}%` }));
+    pace == null ? null : el("span", { class: "pace", style: `width:${(pace * 100).toFixed(1)}%` }),
+    el("span", { class: "fill", style: `width:${Math.min(100, (spent / budget) * 100)}%` }));
+}
+
+// Share of this month gone by the end of today: the 15th of a 30-day month is 0.5.
+function paceToday() {
+  const today = new Date();
+  return today.getDate() / new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
 }
 
 function whenText(month, now) {
