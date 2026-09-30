@@ -153,6 +153,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .login-wrap { width: 100%; max-width: 360px; text-align: left; }
 .login-wrap h1 { font-size: 24px; margin: 0 0 4px; text-align: center; }
 .login-wrap .sub { color: var(--muted); text-align: center; margin: 0 0 22px; }
+.login-wrap .sub + .sub { margin-top: -12px; }
+.login-wrap .forgot { display: block; margin: 14px auto 0; }
 .field { display: block; margin-bottom: 12px; }
 .field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
 .text-input {

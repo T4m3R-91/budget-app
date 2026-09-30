@@ -1,10 +1,10 @@
-// Starts the app: sign-in, loading the household's lists, and switching between tabs. Also the
-// offline side: the app's offline copy (sw.js) and its "Reload" for new versions, the offline
-// banner, and sending entries saved offline once the connection is back.
+// Starts the app: sign-in (and "Forgot password?"), loading the household's lists, and switching
+// between tabs. Also the offline side: the app's offline copy (sw.js) and its "Reload" for new
+// versions, the offline banner, and sending entries saved offline once the connection is back.
 
 import { configured, sb, reloadLists } from "./db.js";
 import { state } from "./state.js";
-import { el, friendlyError, applyTheme, isNetworkError } from "./ui.js";
+import { el, toast, friendlyError, applyTheme, isNetworkError } from "./ui.js";
 import { showAdd, showEdit, showRecurringLog, showRecurringEdit } from "./entry.js";
 import { refreshRecurring } from "./recurring.js";
 import { syncOutbox } from "./outbox.js";
@@ -17,6 +17,13 @@ import { showProfile } from "./profile.js";
 import { showBudget, showBudgetEditor } from "./budget.js";
 
 window.__appStarted = true;
+
+// The link in a password-reset email opens the app with a one-time sign-in in the address
+// (#access_token=…&type=recovery), or with why it didn't work (#error_description=…). supabase-js
+// reads that sign-in and blanks the address as it starts, so note here which it was.
+const arrival = new URLSearchParams(location.hash.slice(1));
+const resetToken = arrival.get("type") === "recovery" ? arrival.get("access_token") : null;
+const resetLinkFailed = Boolean(arrival.get("error_description"));
 
 const $ = (id) => document.getElementById(id);
 const TABS = { add: showAdd, history: showHistory, dashboard: showDashboard, budget: showBudget, profile: showProfile };
@@ -110,7 +117,98 @@ function showLogin(message = "") {
   $("screen-login").replaceChildren(el("div", { class: "login-wrap" },
     el("h1", { text: "Household Budget" }),
     el("p", { class: "sub", text: "Sign in once on this device and you'll stay signed in." }),
+    form,
+    el("button", { type: "button", class: "link-btn forgot", text: "Forgot password?", onclick: () => showForgot(email.value.trim()) })));
+}
+
+// ---------- forgot password ----------
+
+// Supabase emails a link that opens the app signed in, on the "Choose a new password" screen.
+function showForgot(prefill = "") {
+  showScreen("login");
+  const email = el("input", { class: "text-input", type: "email", autocomplete: "username", inputmode: "email", required: true, id: "forgot-email", value: prefill });
+  const error = el("p", { class: "form-error", role: "alert" });
+  const button = el("button", { type: "submit", class: "btn primary full", text: "Email me a reset link" });
+  const wrap = el("div", { class: "login-wrap" });
+
+  const form = el("form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      error.textContent = "";
+      if (!navigator.onLine) {
+        error.textContent = "Sending a reset link needs a connection.";
+        return;
+      }
+      button.disabled = true;
+      button.textContent = "Sending…";
+      const address = email.value.trim();
+      // Back to this same address: the link opens the app wherever it's hosted.
+      const { error: err } = await sb.auth.resetPasswordForEmail(address, { redirectTo: location.origin + location.pathname });
+      if (err) {
+        error.textContent = /rate limit/i.test(err.message) ? "Too many reset emails were sent recently. Try again in an hour." : friendlyError(err);
+        button.disabled = false;
+        button.textContent = "Email me a reset link";
+        return;
+      }
+      // Supabase doesn't say whether the email has an account, and neither does this.
+      wrap.replaceChildren(
+        el("h1", { text: "Check your email" }),
+        el("p", { class: "sub", text: `If ${address} has an account, a link to choose a new password is on its way. It works once, within an hour.` }),
+        el("p", { class: "sub", text: "Tap it, choose the new password, then sign in with it here." }),
+        el("button", { type: "button", class: "btn secondary full", text: "Back to sign in", onclick: () => showLogin() }));
+    },
+  },
+    el("label", { class: "field", for: "forgot-email" }, el("span", { text: "Email" }), email),
+    error,
+    button);
+
+  wrap.replaceChildren(
+    el("h1", { text: "Reset your password" }),
+    el("p", { class: "sub", text: "We'll email you a link to choose a new one." }),
+    form,
+    el("button", { type: "button", class: "link-btn forgot", text: "Back to sign in", onclick: () => showLogin() }));
+  $("screen-login").replaceChildren(wrap);
+  email.focus();
+}
+
+// Opened from the reset link, already signed in by it: the new password comes first.
+function showNewPassword(session) {
+  showScreen("login");
+  const field = (id, label) => el("input", { class: "text-input", type: "password", autocomplete: "new-password", minlength: 8, required: true, id, "aria-label": label });
+  const pw = field("new-password", "New password");
+  const again = field("new-password-again", "New password again");
+  const error = el("p", { class: "form-error", role: "alert" });
+  const button = el("button", { type: "submit", class: "btn primary full", text: "Save new password" });
+
+  const form = el("form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      error.textContent = "";
+      if (pw.value.length < 8) return void (error.textContent = "Use at least 8 characters.");
+      if (pw.value !== again.value) return void (error.textContent = "The two passwords don't match.");
+      button.disabled = true;
+      button.textContent = "Saving…";
+      const { error: err } = await sb.auth.updateUser({ password: pw.value });
+      if (err) {
+        error.textContent = friendlyError(err);
+        button.disabled = false;
+        button.textContent = "Save new password";
+        return;
+      }
+      await enterApp(session);
+      toast("Password changed");
+    },
+  },
+    el("label", { class: "field", for: "new-password" }, el("span", { text: "New password (8+ characters)" }), pw),
+    el("label", { class: "field", for: "new-password-again" }, el("span", { text: "New password again" }), again),
+    error,
+    button);
+
+  $("screen-login").replaceChildren(el("div", { class: "login-wrap" },
+    el("h1", { text: "Choose a new password" }),
+    el("p", { class: "sub", text: `For ${session.user.email}. Use it from now on to sign in, including in the app on your Home Screen.` }),
     form));
+  pw.focus();
 }
 
 function showNotMember(email) {
@@ -245,8 +343,16 @@ async function boot() {
     const { data, error } = await sb.auth.getSession();
     session = data.session || (error && isNetworkError(error) ? session : null);
   }
-  if (session) await enterApp(session);
-  else showLogin();
+  if (resetToken || resetLinkFailed) history.replaceState(null, "", location.pathname + location.search); // no leftovers in the address
+  // Signed in by the reset link itself (not by an earlier sign-in still on this phone).
+  if (resetToken && session?.access_token === resetToken) return showNewPassword(session);
+  const linkProblem = resetToken || resetLinkFailed ? "That reset link has expired or was already used." : "";
+  if (session) {
+    await enterApp(session);
+    if (linkProblem) toast(`${linkProblem} You're still signed in.`);
+  } else {
+    showLogin(linkProblem && `${linkProblem} Tap "Forgot password?" for a new one.`);
+  }
 }
 
 boot().catch((e) => showBootMessage(friendlyError(e), () => location.reload()));
