@@ -171,6 +171,35 @@ export function fetchUnlinkedBetween(first, end) {
     .is("recurring_id", null).gte("occurred_on", first).lt("occurred_on", end).order("id")));
 }
 
+// ---------- favorites (see favorites-migration.sql) ----------
+
+// Your own favorites, most used first (the database only returns your own). null until
+// favorites-migration.sql has run, so the Add tab then shows no favorites row.
+export function fetchFavorites() {
+  return cached(`favorites:${state.me?.email}`, async () => {
+    const { data, error } = await sb.from("favorites").select("*").order("uses", { ascending: false }).order("created_at", { ascending: false });
+    if (isMissingTable(error)) return null;
+    return unwrap({ data, error });
+  });
+}
+
+export async function insertFavorite(row) {
+  return unwrap(await sb.from("favorites").insert(row).select().single());
+}
+
+export async function updateFavorite(id, patch) {
+  unwrap(await sb.from("favorites").update(patch).eq("id", id));
+}
+
+export async function deleteFavorite(id) {
+  unwrap(await sb.from("favorites").delete().eq("id", id));
+}
+
+// One more entry saved from it.
+export async function useFavorite(id) {
+  unwrap(await sb.rpc("use_favorite", { p_id: id }));
+}
+
 // ---------- the household's lists ----------
 
 export async function insertListItem(table, row) {

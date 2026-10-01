@@ -5,7 +5,7 @@
 import { configured, sb, reloadLists } from "./db.js";
 import { state } from "./state.js";
 import { el, toast, friendlyError, applyTheme, isNetworkError } from "./ui.js";
-import { showAdd, showEdit, showRecurringLog, showRecurringEdit } from "./entry.js";
+import { showAdd, showEdit, showRecurringLog, showRecurringEdit, showFavorite } from "./entry.js";
 import { refreshRecurring } from "./recurring.js";
 import { syncOutbox } from "./outbox.js";
 import { dataAsOf, clearStale } from "./offline.js";
@@ -67,6 +67,11 @@ function route() {
   if (hash.startsWith("#recurring/")) { // edit a recurring item
     showScreen("add", "budget");
     showRecurringEdit(hash.slice(11));
+    return;
+  }
+  if (hash.startsWith("#fav/")) { // a new favorite (#fav/new), or editing one
+    showScreen("add");
+    showFavorite(decodeURIComponent(hash.slice(5)));
     return;
   }
   if (hash === "#settings") { // Settings now lives in Profile; old links and bookmarks land there
