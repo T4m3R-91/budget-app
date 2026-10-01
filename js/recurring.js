@@ -9,8 +9,8 @@ import { state, byId } from "./state.js";
 import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate } from "./ui.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
-  fetchRecurring, updateRecurring, skipOccurrence, unskipOccurrence, fetchUnlinkedBetween,
-  insertTransaction, deleteTransaction, latestEntryRate,
+  fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, skipOccurrence, unskipOccurrence,
+  fetchUnlinkedBetween, insertTransaction, deleteTransaction, latestEntryRate,
 } from "./db.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -69,6 +69,56 @@ export function nextDue(item, from = isoLocal()) {
     if (due && due >= from) return due;
   }
   return from;
+}
+
+// ---------- editing an item ----------
+
+// Past months are checked against an item's details and schedule (logged entries by due date,
+// hand-typed ones by amount), so an edit mustn't rewrite them: the edited version is a new item
+// taking over from a date, and the old one ends the day before that month. Months already logged,
+// matched or skipped stay with the old version, so the change starts after the last of them and
+// a month never gets two.
+
+// Where an edit starts by default: the first due date from today on that isn't logged or skipped.
+export function firstOpenDue(item, from = isoLocal()) {
+  let due = nextDue(item, from);
+  for (let i = 0; i < 26 && data.handled.has(key(item.id, due)); i++) due = nextDue(item, addMonths(firstOf(due), 1));
+  return due;
+}
+
+// Saves an edit taking over from `date` (the new schedule's first due date). Resolves { from, note }:
+// the date it actually takes over from, and why it's later when it is.
+export async function saveItemEdit(item, fields, date) {
+  const done = [...data.handled.entries()]
+    .filter(([k]) => k.startsWith(`${item.id}|`))
+    .map(([k, h]) => ({ due: k.slice(item.id.length + 1), status: h.status }))
+    .sort((a, b) => a.due.localeCompare(b.due));
+  const lastDone = done.at(-1) || null;
+  const schedule = { ...fields, starts_on: "0000-01-01", ended_on: null }; // the new schedule, for nextDue
+  let from = date;
+  for (let i = 0; i < 26 && lastDone && firstOf(from) <= firstOf(lastDone.due); i++) {
+    from = nextDue(schedule, addMonths(firstOf(from), 1));
+  }
+  let note = "";
+  if (from !== date && lastDone) {
+    const month = MONTH_NAMES[Number(lastDone.due.slice(5, 7)) - 1];
+    note = ` (${month} is already ${lastDone.status === "skipped" ? "skipped" : item.type === "income" ? "received" : "paid"})`;
+  }
+
+  // Nothing of it in the past yet: simply change it.
+  if (!lastDone && !occurrencesThrough(item, addMonths(firstOf(from), -1)).length) {
+    await updateRecurring(item.id, { ...fields, starts_on: from });
+    return { from, note };
+  }
+  const endOld = dayBefore(firstOf(from));
+  const created = await insertRecurring({ ...fields, starts_on: from, ended_on: item.ended_on ?? null });
+  try {
+    await updateRecurring(item.id, { ended_on: item.ended_on && item.ended_on < endOld ? item.ended_on : endOld });
+  } catch (e) {
+    await deleteRecurring(created.id).catch(() => {}); // don't leave both running
+    throw e;
+  }
+  return { from, note };
 }
 
 // "🏠 Rent": the item's note if it has one, else its subcategory, category or income source.
@@ -262,7 +312,7 @@ function rowEl({ item, due }, today) {
           : null),
     menuFor === k
       ? el("div", { class: "rec-menu" },
-          el("a", { class: "btn primary small", href: `#recurring/${item.id}`, text: "Edit" }),
+          el("a", { class: "btn primary small", href: `#recurring/${item.id}`, text: "Edit", onclick: () => { menuFor = null; } }),
           el("button", {
             type: "button", class: "btn danger small", text: stopArmed === k ? "Tap again to remove" : removeLabel,
             onclick: (e) => (stopArmed === k ? removeFrom(item, due, handled, e.currentTarget) : (stopArmed = k, paintRecurring())),

@@ -10,11 +10,11 @@ import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
-  insertRecurring, updateRecurring, deleteRecurring, linkToRecurring,
+  insertRecurring, deleteRecurring, linkToRecurring,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
-import { monthStatus, monthOf } from "./budget.js";
-import { refreshRecurring, recurringItem, recurringLabel, nextDue, ordinal, shortDate } from "./recurring.js";
+import { monthStatus, monthOf, budgetMonth, openBudgetOn } from "./budget.js";
+import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, ordinal, shortDate } from "./recurring.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -85,20 +85,22 @@ export async function showRecurringLog(itemId, due) {
     location.hash = "#budget";
     return;
   }
-  f = { ...freshForm(item.type), ...fromItem(item), date: due, recurring: { item, due } };
+  f = { ...freshForm(item.type), ...fromItem(item), date: due, recurring: { item, due }, backTo: budgetMonth() };
   render();
   ensureRate();
   loadBudgetTiles();
 }
 
-// #recurring/<item>: edits the item itself. Changes apply from its next due date on.
+// #recurring/<item>: edits the item itself. Changes apply from its first due date that isn't
+// logged or skipped yet (see saveItemEdit in recurring.js); earlier months are left as they were.
 export async function showRecurringEdit(itemId) {
   const item = await recurringItem(itemId);
   if (!item) {
     location.hash = "#budget";
     return;
   }
-  f = { ...freshForm(item.type), ...fromItem(item), mode: "recur", item, date: nextDue(item), repeat: item.frequency };
+  // On: where the changes take over, the first due date that isn't logged or skipped yet.
+  f = { ...freshForm(item.type), ...fromItem(item), mode: "recur", item, date: firstOpenDue(item), repeat: item.frequency, backTo: budgetMonth() };
   render();
 }
 
@@ -268,7 +270,8 @@ function render() {
   r.classList.toggle("income-mode", income);
 
   // Leaving a recurring form drops it, so the Add tab starts fresh next time.
-  const backToBudget = () => el("a", { class: "link-btn", href: "#budget", text: "Cancel", onclick: () => { f = null; } });
+  // Back to the Budget tab on the month the form was opened from.
+  const backToBudget = () => el("a", { class: "link-btn", href: "#budget", text: "Cancel", onclick: () => { openBudgetOn(f?.backTo); f = null; } });
   const titled = (back, title) => el("div", { class: "entry-head" }, back, el("h2", { text: title }), el("span"));
   const head =
     f.mode === "edit" ? titled(el("a", { class: "link-btn", href: "#history", text: "Cancel" }), income ? "Edit income" : "Edit expense")
@@ -587,7 +590,14 @@ function onTile() {
       ? el("button", {
           type: "button", class: "repeat-btn" + (f.repeat ? " on" : ""), "aria-expanded": String(f.repeatOpen),
           "aria-label": f.repeat ? `Repeats ${f.repeat}. Change` : "Repeat this entry",
-          onclick: (e) => { e.preventDefault(); e.stopPropagation(); f.repeatOpen = !f.repeatOpen; renderMeta(); },
+          // Opening the choices picks Monthly, the usual one; Never turns it off again.
+          onclick: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            f.repeatOpen = !f.repeatOpen;
+            if (f.repeatOpen && !f.repeat) f.repeat = "monthly";
+            renderMeta();
+          },
         }, "↻")
       : null,
     el("span", { class: "on-text" },
@@ -718,9 +728,12 @@ async function save_() {
       return;
     }
     if (form.mode === "recur") {
-      await updateRecurring(form.item.id, itemFields());
+      // The edited version takes over from the On date (or the first month after any already
+      // logged or skipped); earlier months keep the details they had.
+      const { from, note } = await saveItemEdit(form.item, itemFields(), form.date);
       f = null;
-      toast(`${recurringLabel({ ...form.item, ...itemFields() })} updated, from ${shortDate(form.date)} on`);
+      toast(`${recurringLabel({ ...form.item, ...itemFields() })} updated from ${shortDate(from)} on${note}`);
+      openBudgetOn(form.backTo);
       location.hash = "#budget";
       return;
     }
@@ -780,11 +793,12 @@ async function saveOffline(form, row, repeatDropped = false) {
   afterSave(form, row);
 }
 
-// After a save (online or on the phone): back to the Budget tab if it was a recurring item's due
-// date, otherwise a fresh form for the next entry.
+// After a save (online or on the phone): back to the Budget tab, on the month it came from, if it
+// was a recurring item's due date; otherwise a fresh form for the next entry.
 function afterSave(form, row) {
   if (form.recurring) {
     f = null;
+    openBudgetOn(form.backTo);
     location.hash = "#budget";
     return;
   }

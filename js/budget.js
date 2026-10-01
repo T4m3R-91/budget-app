@@ -55,10 +55,18 @@ export async function monthStatus(month) {
 
 // data: month → { status: "loading" | "ready" | "missing" | "error", budget, spent }, where budget is
 // Map(categoryId → EGP) and spent Map(categoryId → { egp, usd }), each entry at its saved values.
-// next: the month to open on once, right after saving one; otherwise the tab opens on this month.
+// next: the month to open on once, right after saving one (or coming back from a recurring item's
+// form opened from it); otherwise the tab opens on this month.
 // earliest: the month of your first entry, the furthest back the month switcher goes.
 const card = { month: null, next: null, earliest: null, data: new Map() };
 let built = false;
+
+// The month the tab is showing (null before it's first opened), and opening it on a given month
+// next time: a recurring item's Edit or Log form returns to the month it was opened from.
+export const budgetMonth = () => card.month;
+export function openBudgetOn(month) {
+  if (month) card.next = month;
+}
 
 export function showBudget() {
   if (!built) {
