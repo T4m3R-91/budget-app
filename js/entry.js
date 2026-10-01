@@ -1,7 +1,8 @@
 // The Add / Edit screen: amount + category are the only required inputs; everything else
 // is defaulted (date today, EGP, you, last payment method, the rate for the date) and editable.
-// The same form also logs a recurring item's due date after changing it (#log/…), and edits a
-// recurring item itself (#recurring/…). The ↻ strip on the On tile makes a new entry repeat.
+// The same form also logs a recurring item's due date after changing it (#log/…), edits a
+// recurring item itself (#recurring/…), and adds or edits a favorite (#fav/…). The ↻ strip on the
+// On tile makes a new entry repeat; the row of favorites above the amount fills the form in a tap.
 
 import { state, byId, subcategoriesOf } from "./state.js";
 import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
@@ -11,6 +12,7 @@ import { getLiveRate, getRateOn } from "./fx.js";
 import {
   insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
   insertRecurring, deleteRecurring, linkToRecurring,
+  fetchFavorites, insertFavorite, updateFavorite, deleteFavorite, useFavorite,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
 import { monthStatus, monthOf, budgetMonth, openBudgetOn } from "./budget.js";
@@ -23,7 +25,7 @@ const screen = () => $("screen-add");
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // Required fields that Save can point at when they're missing.
-const FIELDS = { amount: "e-amount-box", grid: "e-grid", rate: "e-rate" };
+const FIELDS = { amount: "e-amount-box", grid: "e-grid", rate: "e-rate", name: "e-fav-name" };
 
 let f = null; // form state
 let commitRateEdit = null; // set while the rate field is open, so Save can apply it
@@ -64,6 +66,8 @@ function freshForm(type = "expense") {
     saving: false, confirmDelete: false,
     repeat: null, repeatOpen: false, // null | "monthly" | "yearly"; repeatOpen shows its choices
     recurring: null, // { item, due } while logging a recurring item's due date through the form
+    fromFav: null, // the favorite whose details were put in the form (its circle has a ring)
+    fav: null, // a favorite's own form: { id (null when new), name, icon, nameTouched, iconTouched }
   };
 }
 
@@ -105,8 +109,14 @@ export async function showRecurringEdit(itemId) {
 }
 
 export function showAdd() {
-  // Keep a half-filled entry when hopping between tabs; start fresh after an edit.
+  // Keep a half-filled entry when hopping between tabs (or opening a favorite's form); start
+  // fresh after an edit.
+  if (parked) {
+    f = parked;
+    parked = null;
+  }
   if (!f || f.mode !== "add") f = freshForm();
+  loadFavorites();
   if (f.date < isoLocal() && !f.amountText) f.date = isoLocal(); // stale "today" from yesterday
   render();
   if (!["edited", "manual"].includes(f.rateSource)) ensureRate();
@@ -276,10 +286,25 @@ function render() {
   const head =
     f.mode === "edit" ? titled(el("a", { class: "link-btn", href: "#history", text: "Cancel" }), income ? "Edit income" : "Edit expense")
     : f.mode === "recur" ? titled(backToBudget(), "Edit recurring")
+    : f.mode === "fav" ? titled(el("a", { class: "link-btn", href: "#add", text: "Cancel" }), f.fav.id ? "Edit favorite" : "New favorite")
     : f.recurring ? titled(backToBudget(), `Log ${recurringLabel(f.recurring.item)}`)
     : el("div", { class: "entry-head centered" }, typeSeg());
-  const greeting = f.mode === "add" && !f.recurring
+  const adding = f.mode === "add" && !f.recurring;
+  const greeting = adding
     ? el("p", { class: "greeting" }, `${GREETING[partOfDay()]}, `, el("strong", { text: state.me.display_name }))
+    : null;
+  // Adding: your favorites, under Expense | Income. A favorite's form: its emoji and name.
+  const favs = adding ? [el("div", { id: "e-favs", class: "fav-row", hidden: !favorites })] : [];
+  const favNameRow = f.mode === "fav"
+    ? el("div", { class: "fav-fields" },
+        el("input", {
+          id: "e-fav-icon", class: "text-input fav-icon-input", maxlength: 8, placeholder: "⭐", "aria-label": "Emoji", value: f.fav.icon,
+          oninput: (e) => { f.fav.icon = e.target.value; f.fav.iconTouched = e.target.value.trim() !== ""; },
+        }),
+        el("input", {
+          id: "e-fav-name", class: "text-input", maxlength: 40, placeholder: "Name, e.g. Coffee", "aria-label": "Name", value: f.fav.name,
+          oninput: (e) => { f.fav.name = e.target.value; f.fav.nameTouched = e.target.value.trim() !== ""; },
+        }))
     : null;
 
   // The amount box shows the result of the currency row above it: the number and its unit,
@@ -301,7 +326,7 @@ function render() {
       el("span", { id: "e-amount-cur", class: "amount-cur" })),
     el("span", { id: "e-converted", class: "converted", "aria-live": "polite" }));
 
-  const amountRow = f.mode === "add" && !f.recurring
+  const amountRow = adding
     ? el("div", { class: "amount-row" },
         amountBox,
         el("span", { class: "or", text: "or" }),
@@ -310,7 +335,8 @@ function render() {
     : el("div", { class: "amount-row solo" }, amountBox);
 
   const save = el("button", { id: "e-save", type: "button", class: "btn primary", onclick: save_ });
-  const actions = f.mode === "edit"
+  // Editing an entry or a favorite: Delete beside Save.
+  const actions = f.mode === "edit" || (f.mode === "fav" && f.fav.id)
     ? el("div", { class: "actions two" },
         el("button", { id: "e-delete", type: "button", class: "btn danger", text: "Delete", onclick: onDelete }), save)
     : el("div", { class: "actions" }, save);
@@ -318,6 +344,8 @@ function render() {
   r.replaceChildren(...[
     greeting,
     head,
+    ...favs,
+    favNameRow,
     el("div", { class: "cur-row" },
       el("div", { id: "e-cur-seg", class: "seg small", role: "group", "aria-label": "Currency" }),
       el("div", { id: "e-rate", class: "rate-box" })),
@@ -328,7 +356,7 @@ function render() {
       id: "e-desc", class: "text-input note-input", rows: 1, maxlength: 200,
       placeholder: income ? "Note (optional)" : "Note (optional), e.g. Negmet Heliopolis",
       "aria-label": "Note", value: f.description,
-      oninput: (e) => { f.description = e.target.value; fitNote(); },
+      oninput: (e) => { f.description = e.target.value; fitNote(); suggestFav(); },
     }),
     el("div", { class: "action-bar" }, actions),
   ].filter(Boolean));
@@ -341,6 +369,7 @@ function render() {
   renderGrid();
   renderMeta();
   renderSaveButton();
+  renderFavs();
 }
 
 // The amount input takes the width of what's typed (or the "0" placeholder).
@@ -365,7 +394,7 @@ function typeSeg() {
         class: [f.type === t ? "active" : "", t === "income" ? "is-income" : ""].join(" "),
         "aria-pressed": String(f.type === t),
         text: t === "expense" ? "Expense" : "Income",
-        onclick: () => { if (f.type !== t) { f.type = t; render(); } },
+        onclick: () => { if (f.type !== t) { Object.assign(f, { type: t, fromFav: null }); render(); } },
       })));
 }
 
@@ -389,7 +418,8 @@ function renderRate() {
   const box = $("e-rate");
   if (!box) return;
   commitRateEdit = null;
-  if (f.mode === "recur") return box.replaceChildren(); // a recurring item takes the rate on the day it's logged
+  // A recurring item or a favorite takes the rate on the day it's logged.
+  if (f.mode === "recur" || f.mode === "fav") return box.replaceChildren();
 
   if (f.editingRate) {
     const input = el("input", {
@@ -495,6 +525,7 @@ function pick(id) {
     f.categoryId = f.categoryId === id ? null : id;
   }
   renderGrid();
+  suggestFav();
 }
 
 const GRID_COLUMNS = 3; // as .cat-grid in styles.css
@@ -517,7 +548,7 @@ function renderSubs() {
       el("button", {
         type: "button", class: "subchip" + (s.id === f.subcategoryId ? " sel" : ""),
         "aria-pressed": String(s.id === f.subcategoryId), text: s.name,
-        onclick: () => { f.subcategoryId = f.subcategoryId === s.id ? null : s.id; renderSubs(); },
+        onclick: () => { f.subcategoryId = f.subcategoryId === s.id ? null : s.id; renderSubs(); suggestFav(); },
       }))));
 }
 
@@ -541,14 +572,20 @@ function methodTile(label, ariaLabel, list, value, onChange) {
     selectControl(ariaLabel, options, current, (v) => { onChange(v || null); renderMeta(); }));
 }
 
+// A detail a favorite can't change, shown for what it'll be (dashed and faded: not a button).
+const fixedTile = (label, value) =>
+  el("div", { class: "meta-tile fixed", "aria-disabled": "true", title: "Set when you use the favorite" },
+    el("span", { class: "k", text: label }), el("span", { class: "v", text: value }));
+
 // By · On · With (income: By · On · In), laid out on the same 3-column grid as the categories but
-// grey and borderless, so they read as the entry's details rather than more categories.
+// grey, so they read as the entry's details rather than more categories. A favorite keeps only
+// With (or In): By and On show what it'll be (you, today) but can't be changed.
 function renderMeta() {
   const income = f.type === "income";
   const people = state.members.map((m) => ({
     value: m.email, label: m.email === state.me.email ? `${m.display_name} (you)` : m.display_name,
   }));
-  const tiles = [
+  const tiles = f.mode === "fav" ? [fixedTile("By", `${state.me.display_name} (you)`), fixedTile("On", "Today")] : [
     metaTile("By", people.find((p) => p.value === f.who)?.label ?? "—",
       selectControl(income ? "Received by" : "Paid by", people, f.who, (v) => { f.who = v; renderMeta(); })),
     onTile(),
@@ -631,6 +668,7 @@ function renderSaveButton() {
   button.disabled = f.saving;
   button.textContent = f.saving ? "Saving…"
     : f.mode === "edit" || f.mode === "recur" ? "Save changes"
+    : f.mode === "fav" ? "Save favorite"
     : f.recurring ? `Log ${f.type}`
     : f.type === "income" ? "Save income" : "Save expense";
 }
@@ -663,6 +701,7 @@ function flag(missing) {
   const first = missing[0];
   $(FIELDS[first]).scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
   if (first === "amount") $("e-amount").focus({ preventScroll: true });
+  if (first === "name") $("e-fav-name").focus({ preventScroll: true });
   if (first === "rate") { f.editingRate = true; renderRate(); }
 }
 
@@ -674,6 +713,7 @@ function nameOf(t) {
 
 async function save_() {
   if (f.saving) return;
+  if (f.mode === "fav") return saveFavorite();
   if (commitRateEdit) {
     commitRateEdit();
     renderRate();
@@ -742,6 +782,7 @@ async function save_() {
     rememberMethod(lastReceivingKey(), row.receiving_method_id);
     if (!navigator.onLine) return await saveOffline(form, row);
     const saved = await insertTransaction(row);
+    if (form.fromFav) countUse(form.fromFav);
     // Set to repeat: the item starts with this entry as its first occurrence.
     let repeatNote = "";
     let itemId = null;
@@ -848,6 +889,7 @@ async function onDelete(e) {
   }
   btn.disabled = true;
   try {
+    if (form.mode === "fav") return await deleteFav(form.fav.id);
     await deleteTransaction(form.id);
     f = null;
     toast("Entry deleted");
@@ -858,6 +900,194 @@ async function onDelete(e) {
     btn.textContent = "Delete";
     toast(friendlyError(err));
   }
+}
+
+// ---------- favorites ----------
+
+// Your own favorites (see favorites-migration.sql): a row of circles under Expense | Income, most
+// used first. Tapping one fills the form with its details (keeping the date); tapping it again
+// clears the form. + opens a new favorite's form, starting from what's in the Add form. Holding a
+// circle opens its own form, to change or delete it. null until loaded, or when not set up yet
+// (no row then).
+let favorites = null;
+let heldFav = null; // the favorite just held: the click that ends the hold isn't a tap
+let parked = null; // the Add form, kept while a favorite's form is open
+
+async function loadFavorites() {
+  try {
+    favorites = await fetchFavorites();
+  } catch { /* offline with nothing kept yet: no row */ }
+  renderFavs();
+}
+
+const favOrder = (a, b) => b.uses - a.uses || b.created_at.localeCompare(a.created_at);
+
+function renderFavs() {
+  const row = $("e-favs");
+  if (!row || !f) return;
+  row.hidden = !favorites;
+  if (!favorites) return;
+  row.replaceChildren(
+    el("button", { type: "button", class: "fav fav-new", "aria-label": "New favorite", onclick: () => openFavForm("new") },
+      el("span", { class: "fav-ring", "aria-hidden": "true", text: "+" }), el("span", { class: "fav-name", text: "New" })),
+    ...favorites.filter((x) => x.type === f.type).sort(favOrder).map(favButton));
+}
+
+// A circle: tap to use it; hold it (half a second, or right-click with a mouse) to edit it.
+function favButton(fav) {
+  let timer = null;
+  let start = null;
+  const hold = (e) => {
+    heldFav = fav.id;
+    e?.currentTarget?.classList.add("held");
+    navigator.vibrate?.(10);
+    openFavForm(fav.id);
+  };
+  const stop = () => clearTimeout(timer);
+  return el("button", {
+    type: "button", class: "fav" + (f.fromFav === fav.id ? " active" : ""), "data-id": fav.id,
+    "aria-pressed": String(f.fromFav === fav.id), title: fav.name,
+    onpointerdown: (e) => {
+      heldFav = null;
+      start = [e.clientX, e.clientY];
+      stop();
+      const button = e.currentTarget;
+      timer = setTimeout(() => hold({ currentTarget: button }), 500);
+    },
+    onpointermove: (e) => { if (start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 8) stop(); }, // scrolling the row
+    onpointerup: stop,
+    onpointerleave: stop,
+    onpointercancel: stop,
+    oncontextmenu: (e) => { e.preventDefault(); stop(); hold(e); },
+    onclick: () => {
+      if (heldFav === fav.id) return void (heldFav = null);
+      useFav(fav);
+    },
+  }, el("span", { class: "fav-ring", "aria-hidden": "true", text: fav.icon }), el("span", { class: "fav-name", text: fav.name }));
+}
+
+// A favorite's details as form fields.
+function favFields(fav) {
+  return {
+    type: fav.type, amountText: fav.amount != null ? String(Number(fav.amount)) : "", currency: fav.currency,
+    categoryId: fav.category_id, subcategoryId: fav.subcategory_id, sourceId: fav.income_source_id,
+    paymentMethodId: fav.payment_method_id, receivingMethodId: fav.receiving_method_id ?? null,
+    description: fav.description || "",
+  };
+}
+
+// The details a new favorite takes from the Add form.
+const formDetails = ({ type, amountText, currency, categoryId, subcategoryId, sourceId, paymentMethodId, receivingMethodId, description }) =>
+  ({ type, amountText, currency, categoryId, subcategoryId, sourceId, paymentMethodId, receivingMethodId, description });
+
+// Tapping a circle: its details replace what's in the form (the date and its rate stay); tapping
+// the ringed one again clears the form.
+function useFav(fav) {
+  const old = f;
+  const keep = { date: old.date, rate: old.rate, rateSource: old.rateSource, rateNote: old.rateNote, rateFallback: old.rateFallback };
+  f = old.fromFav === fav.id
+    ? { ...freshForm(old.type), ...keep }
+    : { ...freshForm(fav.type), ...keep, ...favFields(fav), fromFav: fav.id };
+  render();
+  if (old.rateLoading || !f.rate) ensureRate();
+  if (f.fromFav && !f.amountText) $("e-amount").focus();
+}
+
+// + or Edit: the Add form waits (parked) while the favorite's form is open.
+function openFavForm(id) {
+  if (!navigator.onLine) return toast("Saving favorites needs a connection. Try again when you're online.");
+  if (f?.mode === "add" && !f.recurring) parked = f;
+  location.hash = `#fav/${id}`;
+}
+
+// #fav/new or #fav/<id>: a favorite's own form (the Add form plus emoji and name; nothing else
+// required, no By or date).
+export function showFavorite(id) {
+  const fav = id === "new" ? null : favorites?.find((x) => x.id === id);
+  if (!favorites || (id !== "new" && !fav)) {
+    location.hash = "#add";
+    return;
+  }
+  const base = freshForm(fav?.type || parked?.type || "expense");
+  f = fav
+    ? { ...base, ...favFields(fav), mode: "fav", fav: { id: fav.id, name: fav.name, icon: fav.icon, nameTouched: true, iconTouched: true } }
+    : { ...base, ...(parked ? formDetails(parked) : {}), mode: "fav", fav: { id: null, name: "", icon: "", nameTouched: false, iconTouched: false } };
+  render();
+  suggestFav();
+}
+
+// Until you type your own: the name follows the note (or subcategory, or category) and the emoji
+// the category's (or income source's).
+function suggestFav() {
+  if (f?.mode !== "fav") return;
+  const income = f.type === "income";
+  const kind = income ? byId(state.incomeSources, f.sourceId) : byId(state.categories, f.categoryId);
+  const sub = income ? null : byId(state.subcategories, f.subcategoryId);
+  if (!f.fav.nameTouched) {
+    f.fav.name = (f.description.trim() || sub?.name || kind?.name || "").slice(0, 40);
+    if ($("e-fav-name")) $("e-fav-name").value = f.fav.name;
+  }
+  if (!f.fav.iconTouched) {
+    f.fav.icon = kind?.icon || "";
+    if ($("e-fav-icon")) $("e-fav-icon").value = f.fav.icon;
+  }
+}
+
+async function saveFavorite() {
+  const form = f;
+  const name = form.fav.name.trim();
+  if (!name) return flag(["name"]);
+  if (!navigator.onLine) return toast("Saving favorites needs a connection. Try again when you're online.");
+  const expense = form.type === "expense";
+  const row = {
+    type: form.type, name, icon: form.fav.icon.trim() || "⭐",
+    amount: parseAmount(form.amountText), currency: form.currency,
+    category_id: expense ? form.categoryId : null, subcategory_id: expense ? form.subcategoryId : null,
+    income_source_id: expense ? null : form.sourceId, payment_method_id: expense ? form.paymentMethodId : null,
+    ...(state.receivingMethods ? { receiving_method_id: expense ? null : form.receivingMethodId } : {}),
+    description: form.description.trim() || null,
+  };
+  form.saving = true;
+  renderSaveButton();
+  try {
+    if (form.fav.id) await updateFavorite(form.fav.id, row);
+    else await insertFavorite(row);
+    f = null;
+    toast(`${row.icon} ${row.name} ${form.fav.id ? "updated" : "added to your favorites"}`);
+    location.hash = "#add"; // back to the entry you'd started, with the row reloaded
+  } catch (e) {
+    form.saving = false;
+    if (form === f) renderSaveButton();
+    toast(friendlyError(e));
+  }
+}
+
+// Delete on a favorite's form (after "Tap to confirm"): back to the Add tab, with Undo.
+async function deleteFav(id) {
+  const fav = favorites.find((x) => x.id === id);
+  await deleteFavorite(id);
+  favorites = favorites.filter((x) => x.id !== id);
+  if (parked?.fromFav === id) parked.fromFav = null;
+  f = null;
+  location.hash = "#add";
+  toast(`Deleted ${fav.icon} ${fav.name}`, {
+    label: "Undo",
+    run: async () => {
+      try {
+        await insertFavorite(fav); // as it was: same id, uses and date
+        toast(`${fav.icon} ${fav.name} is back`);
+      } catch (e) { toast(friendlyError(e)); }
+      loadFavorites();
+    },
+  });
+}
+
+// An entry saved from a favorite counts as one more use (the row shows the most used first).
+// Entries saved offline aren't counted.
+function countUse(id) {
+  const fav = favorites?.find((x) => x.id === id);
+  if (fav) fav.uses += 1;
+  useFavorite(id).catch(() => { /* this use just isn't counted */ });
 }
 
 // ---------- receipt scan ----------

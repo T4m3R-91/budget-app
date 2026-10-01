@@ -278,6 +278,9 @@ a.btn { display: inline-block; text-decoration: none; }
   background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .meta-tile:focus-within { border-color: var(--accent); }
+/* Not a button (a favorite's By and On): dashed outline, no fill, faded text. */
+.meta-tile.fixed { cursor: default; background: transparent; border-style: dashed; }
+.meta-tile.fixed .k, .meta-tile.fixed .v { color: var(--faint); }
 /* In Income mode every focus highlight is green, matching the income tiles and Save button. */
 .income-mode .meta-tile:focus-within,
 .income-mode .text-input:focus { border-color: var(--income); }
@@ -308,6 +311,35 @@ a.btn { display: inline-block; text-decoration: none; }
 .income-mode .meta-tile .r { color: var(--income); }
 .repeat-seg { grid-column: 1 / -1; display: flex; }
 .repeat-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
+
+/* Favorites: a row of circles under Expense | Income that scrolls sideways (to the screen's edges),
+   + New first. The one whose details are in the form has a ring; holding one opens its form. */
+.fav-row {
+  display: flex; gap: 10px; overflow-x: auto; margin: 12px -16px 0; padding: 2px 16px 4px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.fav-row::-webkit-scrollbar { display: none; }
+.fav {
+  flex: none; width: 62px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: 0; padding: 0; color: var(--text); cursor: pointer;
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+}
+.fav-ring {
+  width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 24px; line-height: 1; background: var(--panel); border: 2px solid var(--line);
+  transition: transform 0.15s ease;
+}
+.fav-name { max-width: 100%; font-size: 11.5px; line-height: 1.2; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-new .fav-ring { border-style: dashed; color: var(--accent); font-size: 26px; font-weight: 300; }
+.fav.active .fav-ring { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fav.active .fav-name { color: var(--text); font-weight: 600; }
+.income-mode .fav-new .fav-ring { color: var(--income); }
+.income-mode .fav.active .fav-ring { border-color: var(--income); box-shadow: 0 0 0 3px var(--income-soft); }
+.fav.held .fav-ring { transform: scale(0.9); }
+/* A favorite's own form: its emoji and name, above the amount. */
+.fav-fields { display: flex; gap: 8px; margin-top: 12px; }
+.fav-fields .text-input { flex: 1; min-width: 0; }
+.fav-fields .fav-icon-input { flex: 0 0 56px; text-align: center; font-size: 20px; padding: 6px; }
 
 /* Note: one line below By · On · With, growing as you type (fitNote in entry.js). */
 .note-input { display: block; margin-top: 10px; resize: none; overflow: hidden; line-height: 1.4; font-family: inherit; font-size: 14px; background: var(--panel); }
