@@ -88,25 +88,30 @@ export function firstOpenDue(item, from = isoLocal()) {
 
 // Saves an edit taking over from `date` (the new schedule's first due date). Resolves { from, note }:
 // the date it actually takes over from, and why it's later when it is.
+// The item's last occurrence that's logged, matched or skipped: { due, status }, or null.
+function lastDone(itemId) {
+  return [...data.handled.entries()]
+    .filter(([k]) => k.startsWith(`${itemId}|`))
+    .map(([k, h]) => ({ due: k.slice(itemId.length + 1), status: h.status }))
+    .sort((a, b) => a.due.localeCompare(b.due))
+    .at(-1) || null;
+}
+
 export async function saveItemEdit(item, fields, date) {
-  const done = [...data.handled.entries()]
-    .filter(([k]) => k.startsWith(`${item.id}|`))
-    .map(([k, h]) => ({ due: k.slice(item.id.length + 1), status: h.status }))
-    .sort((a, b) => a.due.localeCompare(b.due));
-  const lastDone = done.at(-1) || null;
+  const last = lastDone(item.id);
   const schedule = { ...fields, starts_on: "0000-01-01", ended_on: null }; // the new schedule, for nextDue
   let from = date;
-  for (let i = 0; i < 26 && lastDone && firstOf(from) <= firstOf(lastDone.due); i++) {
+  for (let i = 0; i < 26 && last && firstOf(from) <= firstOf(last.due); i++) {
     from = nextDue(schedule, addMonths(firstOf(from), 1));
   }
   let note = "";
-  if (from !== date && lastDone) {
-    const month = MONTH_NAMES[Number(lastDone.due.slice(5, 7)) - 1];
-    note = ` (${month} is already ${lastDone.status === "skipped" ? "skipped" : item.type === "income" ? "received" : "paid"})`;
+  if (from !== date && last) {
+    const month = MONTH_NAMES[Number(last.due.slice(5, 7)) - 1];
+    note = ` (${month} is already ${last.status === "skipped" ? "skipped" : item.type === "income" ? "received" : "paid"})`;
   }
 
   // Nothing of it in the past yet: simply change it.
-  if (!lastDone && !occurrencesThrough(item, addMonths(firstOf(from), -1)).length) {
+  if (!last && !occurrencesThrough(item, addMonths(firstOf(from), -1)).length) {
     await updateRecurring(item.id, { ...fields, starts_on: from });
     return { from, note };
   }
@@ -285,8 +290,10 @@ function rowEl({ item, due }, today) {
     overdue: `Overdue · ${shortDate(due)}`, due: "Due today", later: `Due ${shortDate(due)}`,
   }[status];
   const handled = status === "logged" || status === "skipped";
-  // Remove this occurrence and every later one; one already logged or skipped is kept.
-  const removeLabel = handled ? `Remove after ${shortDate(due)}` : `Remove from ${shortDate(due)} on`;
+  // Remove this occurrence and every later one; one already logged or skipped is kept (and so is
+  // every one up to the last logged or skipped, wherever the menu was opened).
+  const ending = removalEnd(item, due, handled);
+  const removeLabel = ending.after ? `Remove after ${shortDate(ending.after)}` : `Remove from ${shortDate(due)} on`;
   // As in History: the category (or income source) as the title, then subcategory · note.
   const source = income ? byId(state.incomeSources, item.income_source_id) : byId(state.categories, item.category_id);
   const details = [byId(state.subcategories, item.subcategory_id)?.name, item.description].filter(Boolean).join(" · ");
@@ -315,7 +322,7 @@ function rowEl({ item, due }, today) {
           el("a", { class: "btn primary small", href: `#recurring/${item.id}`, text: "Edit", onclick: () => { menuFor = null; } }),
           el("button", {
             type: "button", class: "btn danger small", text: stopArmed === k ? "Tap again to remove" : removeLabel,
-            onclick: (e) => (stopArmed === k ? removeFrom(item, due, handled, e.currentTarget) : (stopArmed = k, paintRecurring())),
+            onclick: (e) => (stopArmed === k ? removeFrom(item, due, ending, e.currentTarget) : (stopArmed = k, paintRecurring())),
           }))
       : null);
 }
@@ -439,13 +446,33 @@ async function unskipNow(item, due, button) {
   refreshRecurring();
 }
 
-// Ends the item from this occurrence on: it and every later one disappear. Earlier ones (and this
-// one too, if it's already logged or skipped) stay, and so do all entries already logged.
-async function removeFrom(item, due, handled, button) {
+// Where Remove on a row ends the item: just before that occurrence (just after it, if it's logged
+// or skipped), but never before the item's last logged or skipped one, so no paid month drops off
+// its card. { endOn, after }: after is the occurrence it's kept through, or null for "from due on".
+function removalEnd(item, due, handled) {
+  const last = lastDone(item.id);
+  const own = handled ? due : dayBefore(due);
+  if (last && last.due > own) return { endOn: last.due, after: last.due };
+  return { endOn: own, after: handled ? due : null };
+}
+
+// Ends the item: the occurrences after its new end disappear; earlier ones stay, and so do all
+// entries already logged. Undo puts back the end it had before (none, usually).
+async function removeFrom(item, due, ending, button) {
   button.disabled = true;
+  const before = item.ended_on ?? null;
   try {
-    await updateRecurring(item.id, { ended_on: handled ? due : dayBefore(due) });
-    toast(`${recurringLabel(item)} removed ${handled ? `after ${shortDate(due)}` : `from ${shortDate(due)} on`}`);
+    await updateRecurring(item.id, { ended_on: ending.endOn });
+    toast(`${recurringLabel(item)} removed ${ending.after ? `after ${shortDate(ending.after)}` : `from ${shortDate(due)} on`}`, {
+      label: "Undo",
+      run: async () => {
+        try {
+          await updateRecurring(item.id, { ended_on: before });
+          toast(`${recurringLabel(item)} is back`);
+        } catch (e) { toast(friendlyError(e)); }
+        refreshRecurring();
+      },
+    });
   } catch (e) {
     toast(friendlyError(e));
   }
