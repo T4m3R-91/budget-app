@@ -125,14 +125,14 @@ export function firstEntryDate() {
 
 // ---------- recurring items (see recurring-migration.sql) ----------
 
-// { items, skips: [{ item_id, due_on }], links: [{ id, recurring_id, recurring_due_on, amount, currency }] }:
+// { items, skips: [{ item_id, due_on }], links: [{ id, recurring_id, recurring_due_on, occurred_on, amount, currency }] }:
 // the recurring items, the occurrences skipped, and the entries logged from them.
 export function fetchRecurring() {
   return cached("recurring", async () => {
     const [items, skips, links] = await Promise.all([
       sb.from("recurring_items").select("*").order("created_at"),
       sb.from("recurring_skips").select("item_id, due_on"),
-      allPages(() => sb.from("transactions").select("id, recurring_id, recurring_due_on, amount, currency").not("recurring_id", "is", null).order("id")),
+      allPages(() => sb.from("transactions").select("id, recurring_id, recurring_due_on, occurred_on, amount, currency").not("recurring_id", "is", null).order("id")),
     ]);
     return { items: unwrap(items), skips: unwrap(skips), links };
   });

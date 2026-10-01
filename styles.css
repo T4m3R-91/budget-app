@@ -373,6 +373,10 @@ a.btn { display: inline-block; text-decoration: none; }
 .txn-main { min-width: 0; display: flex; flex-direction: column; }
 .txn-title { font-weight: 600; font-size: 14.5px; }
 .txn-sub { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* "↻ Due 1 Oct" stays whole at the end; the details before it get the "…" instead. */
+.txn-sub:has(.txn-due) { display: flex; gap: 4px; text-overflow: clip; }
+.txn-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.txn-due { flex: none; }
 .txn-amt { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 /* Money in is green, money out is red: the whole row is tinted (over the panel color),
    the icon tile a shade deeper, and the amount in full color. */
@@ -498,7 +502,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .rec-list { list-style: none; margin: 0; padding: 0; }
 .rec-row { padding: 10px 0; border-top: 1px solid var(--line); }
 .rec-row:first-child { border-top: 0; padding-top: 2px; }
-.rec-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 22px; }
+.rec-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; min-height: 22px; }
+.rec-line .rec-actions { margin-left: auto; } /* if "Log on 28 Sep" doesn't fit beside the date, it moves under it, on the right */
 .rec-line + .rec-line { margin-top: 4px; }
 .rec-name {
   display: flex; align-items: baseline; gap: 6px; min-width: 0; padding: 0; border: 0; background: none;
@@ -518,6 +523,14 @@ a.btn { display: inline-block; text-decoration: none; }
 .rec-row.skipped .rec-amt { text-decoration: line-through; }
 .rec-actions { display: flex; gap: 6px; }
 .rec-actions .btn, .rec-menu .btn { padding: 6px 12px; }
+/* "Log today │ ▾" as one button: the ▾ part is a calendar (an invisible date field over it). */
+.split-btn { display: inline-flex; }
+.split-btn .btn:first-child { border-radius: 9px 0 0 9px; white-space: nowrap; }
+.rec-actions .split-date {
+  position: relative; display: inline-flex; align-items: center; cursor: pointer;
+  border-radius: 0 9px 9px 0; padding: 6px 9px; border-left: 1px solid color-mix(in srgb, #fff 40%, var(--accent));
+}
+.split-date input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .rec-menu { display: flex; gap: 8px; margin-top: 8px; }
 .rec-left { display: flex; justify-content: space-between; gap: 10px; margin: 8px 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
 .rec-left span:last-child { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }

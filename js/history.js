@@ -3,7 +3,7 @@
 // Entries saved offline show on top, under "Waiting to sync", until they reach the server.
 
 import { state, byId, memberName } from "./state.js";
-import { el, fmtMoney, friendlyDate, friendlyError, toast } from "./ui.js";
+import { el, fmtMoney, friendlyDate, friendlyError, toast, parseISODate } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
 import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 import { pendingEntries, removePending } from "./outbox.js";
@@ -131,6 +131,13 @@ function pendingRow(t) {
       })));
 }
 
+// "1 Oct" (with the year when it isn't this year).
+function plainDate(iso) {
+  const d = parseISODate(iso);
+  const year = d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {};
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", ...year });
+}
+
 function row(t) {
   const income = t.type === "income";
   const kind = income ? byId(state.incomeSources, t.income_source_id) : byId(state.categories, t.category_id);
@@ -138,11 +145,15 @@ function row(t) {
     .filter(Boolean)
     .join(" · ");
   const other = t.currency === "USD" ? fmtMoney(t.amount_egp, "EGP") : fmtMoney(t.amount_usd, "USD", { code: true });
+  // Logged from a recurring item: which due date it settles ("↻ Due 1 Oct"), so a payment made in
+  // another month still shows the month it belongs to. It's kept whole; the details before it
+  // are shortened instead when the line is too long.
+  const due = t.recurring_due_on ? `${detail ? "· " : ""}↻ Due ${plainDate(t.recurring_due_on)}` : null;
   return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}` },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: kind?.name || "Unknown" }),
-      el("span", { class: "txn-sub", text: detail })),
+      el("span", { class: "txn-sub" }, el("span", { class: "txn-detail", text: detail }), due ? el("span", { class: "txn-due", text: due }) : null)),
     el("span", { class: "txn-amt" },
       (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
       el("span", { class: "alt", text: `≈ ${other}` })));
