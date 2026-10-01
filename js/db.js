@@ -57,13 +57,27 @@ export async function fetchTransaction(id) {
   return unwrap(await sb.from("transactions").select("*").eq("id", id).maybeSingle());
 }
 
+// A rate taken on the entry's own day is saved as "historical". Until historical-rates-migration.sql
+// has run, the database refuses that; the entry is then saved as "live" (same rate, older label).
+const historicalRefused = (row, e) => row.rate_source === "historical" && e?.code === "23514" && /rate_source/.test(e.message || "");
+
 // row may carry its own id (new entries do), so a retry after a lost reply can't save it twice.
 export async function insertTransaction(row) {
-  return unwrap(await sb.from("transactions").insert(row).select().single());
+  try {
+    return unwrap(await sb.from("transactions").insert(row).select().single());
+  } catch (e) {
+    if (historicalRefused(row, e)) return insertTransaction({ ...row, rate_source: "live" });
+    throw e;
+  }
 }
 
 export async function updateTransaction(id, patch) {
-  return unwrap(await sb.from("transactions").update(patch).eq("id", id).select().single());
+  try {
+    return unwrap(await sb.from("transactions").update(patch).eq("id", id).select().single());
+  } catch (e) {
+    if (historicalRefused(patch, e)) return updateTransaction(id, { ...patch, rate_source: "live" });
+    throw e;
+  }
 }
 
 export async function deleteTransaction(id) {
