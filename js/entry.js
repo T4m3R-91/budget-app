@@ -16,7 +16,7 @@ import {
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
 import { monthStatus, monthOf, budgetMonth, openBudgetOn } from "./budget.js";
-import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, ordinal, shortDate } from "./recurring.js";
+import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, handledStatus, ordinal, shortDate } from "./recurring.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -64,7 +64,8 @@ function freshForm(type = "expense") {
     paymentMethodId: rememberedPayment(), receivingMethodId: rememberedReceiving(), who: state.me.email,
     date: isoLocal(), description: "",
     saving: false, confirmDelete: false,
-    repeat: null, repeatOpen: false, // null | "monthly" | "yearly"; repeatOpen shows its choices
+    repeat: null, repeatOpen: false, // null | "monthly" | "yearly" (| "once" for a scheduled item); repeatOpen shows its choices
+    until: null, // a repeat's last day (inclusive), or null: until you remove it
     recurring: null, // { item, due } while logging a recurring item's due date through the form
     fromFav: null, // the favorite whose details were put in the form (its circle has a ring)
     fav: null, // a favorite's own form: { id (null when new), name, icon, nameTouched, iconTouched }
@@ -103,8 +104,17 @@ export async function showRecurringEdit(itemId) {
     location.hash = "#budget";
     return;
   }
-  // On: where the changes take over, the first due date that isn't logged or skipped yet.
-  f = { ...freshForm(item.type), ...fromItem(item), mode: "recur", item, date: firstOpenDue(item), repeat: item.frequency, backTo: budgetMonth() };
+  // A one-time scheduled payment that's done has nothing left to change here.
+  const done = item.frequency === "once" ? handledStatus(item.id, item.starts_on) : null;
+  if (done) {
+    toast(done === "skipped" ? "It's skipped. Unskip it first to change it." : "It's already logged. Change the entry in History instead.");
+    location.hash = "#budget";
+    return;
+  }
+  // On: where the changes take over, the first due date that isn't logged or skipped yet (a
+  // one-time scheduled payment: its own date).
+  const date = item.frequency === "once" ? item.starts_on : firstOpenDue(item);
+  f = { ...freshForm(item.type), ...fromItem(item), mode: "recur", item, date, repeat: item.frequency, until: item.ended_on ?? null, backTo: budgetMonth() };
   render();
 }
 
@@ -595,7 +605,7 @@ function renderMeta() {
   } else if (state.receivingMethods) { // once receiving-methods-migration.sql has run
     tiles.push(methodTile("In", "Received in", state.receivingMethods, f.receivingMethodId, (v) => { f.receivingMethodId = v; }));
   }
-  if (canRepeat() && f.repeatOpen) tiles.push(repeatChoices());
+  if (canRepeat() && f.repeatOpen) tiles.push(...repeatChoices().filter(Boolean));
   $("e-meta").replaceChildren(...tiles);
 }
 
@@ -612,7 +622,9 @@ function onTile() {
       if (!e.target.value) return;
       const monthChanged = monthOf(e.target.value) !== monthOf(f.date);
       f.date = e.target.value;
+      if (f.until && f.until < f.date) f.until = null; // an end before the first date: no end
       renderMeta();
+      renderSaveButton(); // a future date schedules it
       rateFollowsDate();
       if (monthChanged) { renderGrid(); loadBudgetTiles(); } // the tiles show that month's budget
     },
@@ -640,25 +652,65 @@ function onTile() {
     el("span", { class: "on-text" },
       el("span", { class: "k", text: "On" }),
       el("span", { class: "v", text: friendlyDate(f.date) }),
-      f.repeat ? el("span", { class: "r", text: f.repeat === "monthly" ? "Monthly" : "Yearly" }) : null),
+      f.repeat ? el("span", { class: "r", text: { monthly: "Monthly", yearly: "Yearly", once: "Once" }[f.repeat] }) : null,
+      repeating() && f.until ? el("span", { class: "r", text: `to ${dayMonthYear(f.until, true)}` }) : null),
     date);
 }
 
-// Never · Monthly on the 1st · Yearly on 1 Oct, from the entry's date. A recurring item being
-// edited can't be set to Never; "Stop repeating" on the Budget tab ends it.
+const repeating = () => f.repeat === "monthly" || f.repeat === "yearly";
+
+// "15 Sep 2027" (short: "15 Sep 27").
+function dayMonthYear(iso, short = false) {
+  const d = parseISODate(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${short ? String(d.getFullYear()).slice(2) : d.getFullYear()}`;
+}
+
+// Never · Monthly on the 1st · Yearly on 1 Oct, from the entry's date, and for a repeat, Until.
+// Editing a recurring item offers "Once" instead of Never (Remove on the Budget tab ends it).
 function repeatChoices() {
   const d = parseISODate(f.date);
   const choices = [
-    ...(f.mode === "recur" ? [] : [[null, "Never"]]),
+    f.mode === "recur" ? ["once", `Once on ${d.getDate()} ${MONTHS[d.getMonth()]}`] : [null, "Never"],
     ["monthly", `Monthly on the ${ordinal(d.getDate())}`],
     ["yearly", `Yearly on ${d.getDate()} ${MONTHS[d.getMonth()]}`],
   ];
-  return el("div", { class: "seg small repeat-seg", role: "group", "aria-label": "Repeat" },
+  const seg = el("div", { class: "seg small repeat-seg", role: "group", "aria-label": "Repeat" },
     choices.map(([value, label]) =>
       el("button", {
         type: "button", class: (f.repeat === value ? "active" : "") + (f.type === "income" ? " is-income" : ""),
         "aria-pressed": String(f.repeat === value), text: label,
-        onclick: () => { f.repeat = value; f.repeatOpen = false; renderMeta(); },
+        // Monthly / Yearly keep the choices open, for Until; Never / Once close them.
+        onclick: () => {
+          f.repeat = value;
+          if (!repeating()) Object.assign(f, { until: null, repeatOpen: false });
+          renderMeta();
+        },
+      })));
+  return [seg, repeating() ? untilRow() : null];
+}
+
+// Until: the repeat's last date, included ("Until 15 Sep" repeats on 15 Sep too); none = no end.
+// Clearing the date in the calendar goes back to no end.
+function untilRow() {
+  const picked = (e) => {
+    const until = e.target.value && e.target.value >= f.date ? e.target.value : null;
+    if (until !== f.until) {
+      f.until = until;
+      renderMeta();
+    }
+  };
+  return el("div", { class: "until-row" },
+    el("span", { class: "until-k", text: "Until" }),
+    el("label", { class: "until-pick" + (f.until ? " set" : "") },
+      el("span", { text: f.until ? dayMonthYear(f.until) : "No end" }),
+      el("input", {
+        type: "date", min: f.date, value: f.until || "", "aria-label": "Repeat until (included); clear it for no end",
+        onchange: picked,
+        oninput: picked, // some calendars report Clear only as input
+        onclick: (e) => {
+          if (!window.matchMedia("(pointer: fine)").matches) return;
+          try { e.currentTarget.showPicker(); } catch { /* older browsers: the field still takes typing */ }
+        },
       })));
 }
 
@@ -670,8 +722,13 @@ function renderSaveButton() {
     : f.mode === "edit" || f.mode === "recur" ? "Save changes"
     : f.mode === "fav" ? "Save favorite"
     : f.recurring ? `Log ${f.type}`
+    : scheduling() ? (f.type === "income" ? "Schedule income" : "Schedule expense")
     : f.type === "income" ? "Save income" : "Save expense";
 }
+
+// A new entry dated after today isn't saved as an entry yet: it waits on the Budget tab (a
+// scheduled payment, repeating or not) until it's logged.
+const scheduling = () => f.mode === "add" && !f.recurring && f.date > isoLocal();
 
 // ---------- missing required fields ----------
 
@@ -724,6 +781,7 @@ async function save_() {
   if (f.rateLoading) return toast("Getting the exchange rate. Try again in a moment.");
   // Offline, only new entries can be saved (they wait on the phone); changes need a connection.
   if (!navigator.onLine && (f.mode === "edit" || f.mode === "recur")) return toast("Saving changes needs a connection. Try again when you're online.");
+  if (!navigator.onLine && scheduling()) return toast("Scheduling a payment needs a connection. Try again when you're online.");
   if (!navigator.onLine && f.repeat) return toast("Setting a repeat needs a connection. Set Repeat to Never to save it on this phone now.");
 
   const form = f;
@@ -752,10 +810,13 @@ async function save_() {
   const d = parseISODate(form.date);
   const schedule = (repeat) => ({ frequency: repeat, day: d.getDate(), month: repeat === "yearly" ? d.getMonth() + 1 : null });
   const itemFields = () => {
-    // Not the entry's own id or date; and an item takes the rate on the day it's logged.
+    // Not the entry's own id or date; and an item takes the rate on the day it's logged. A
+    // repeat ends after its Until date (none: until it's removed).
     const { id, rate, rate_source, occurred_on, recurring_id, recurring_due_on, ...fields } = row;
-    return { ...fields, ...schedule(form.repeat) };
+    const repeats = form.repeat === "monthly" || form.repeat === "yearly";
+    return { ...fields, ...schedule(form.repeat), ended_on: repeats ? form.until : null };
   };
+  const untilNote = form.until && (form.repeat === "monthly" || form.repeat === "yearly") ? ` until ${dayMonthYear(form.until)}` : "";
 
   form.saving = true;
   renderSaveButton();
@@ -777,9 +838,28 @@ async function save_() {
       location.hash = "#budget";
       return;
     }
-    if (form.recurring) Object.assign(row, { recurring_id: form.recurring.item.id, recurring_due_on: form.recurring.due });
     rememberMethod(lastPaymentKey(), row.payment_method_id);
     rememberMethod(lastReceivingKey(), row.receiving_method_id);
+    // Dated after today: not an entry yet but a scheduled payment, waiting on the Budget tab (on
+    // its date, then monthly or yearly if it repeats) until it's logged at that day's rate.
+    if (form.mode === "add" && !form.recurring && form.date > isoLocal()) {
+      const item = await insertRecurring({ ...itemFields(), ...(form.repeat ? {} : schedule("once")), starts_on: form.date });
+      if (form.fromFav) countUse(form.fromFav);
+      toast(`Scheduled ${recurringLabel(item)} · ${fmtMoney(item.amount, item.currency, { code: true })} for ${shortDate(form.date)}${form.repeat ? `, then ${form.repeat}${untilNote}` : ""}`, {
+        label: "Undo",
+        run: async () => {
+          try {
+            await deleteRecurring(item.id);
+            toast("Schedule removed");
+          } catch (e) { toast(friendlyError(e)); }
+          refreshRecurring();
+        },
+      });
+      refreshRecurring();
+      afterSave(form, null);
+      return;
+    }
+    if (form.recurring) Object.assign(row, { recurring_id: form.recurring.item.id, recurring_due_on: form.recurring.due });
     if (!navigator.onLine) return await saveOffline(form, row);
     const saved = await insertTransaction(row);
     if (form.fromFav) countUse(form.fromFav);
@@ -791,7 +871,7 @@ async function save_() {
         const item = await insertRecurring({ ...itemFields(), starts_on: form.date });
         itemId = item.id;
         await linkToRecurring(saved.id, item.id, form.date);
-        repeatNote = ` · repeats ${form.repeat}`;
+        repeatNote = ` · repeats ${form.repeat}${untilNote}`;
       } catch (e) {
         repeatNote = ` · couldn't set it to repeat (${friendlyError(e)})`;
       }
@@ -844,7 +924,7 @@ function afterSave(form, row) {
     return;
   }
   // Count it on its category tile right away; the refetch below catches anyone else's entries.
-  if (row.type === "expense" && budgetTiles?.month === monthOf(row.occurred_on)) {
+  if (row?.type === "expense" && budgetTiles?.month === monthOf(row.occurred_on)) { // (a scheduled payment has no entry yet)
     const usd = row.currency === "USD";
     const egp = usd ? round2(row.amount * row.rate) : row.amount;
     const inUsd = usd ? row.amount : round2(row.amount / row.rate);

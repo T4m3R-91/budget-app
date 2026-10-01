@@ -274,7 +274,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .meta-tile {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-width: 0; height: 60px; padding: 0 8px; text-align: center; cursor: pointer;
+  min-width: 0; height: 69px; padding: 0 8px; text-align: center; cursor: pointer; /* room for "Monthly / to 5 Feb 27" under the date */
   background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .meta-tile:focus-within { border-color: var(--accent); }
@@ -311,6 +311,15 @@ a.btn { display: inline-block; text-decoration: none; }
 .income-mode .meta-tile .r { color: var(--income); }
 .repeat-seg { grid-column: 1 / -1; display: flex; }
 .repeat-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
+/* Until: the repeat's last date (included), picked from a calendar; clearing it there means no end. */
+.until-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+.until-k { color: var(--muted); font-size: 13px; }
+.until-pick {
+  position: relative; flex: 1; display: flex; align-items: center; justify-content: center; height: 36px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; font-size: 14px; cursor: pointer;
+}
+.until-pick:not(.set) { color: var(--muted); }
+.until-pick input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 
 /* Favorites: a row of circles under Expense | Income that scrolls sideways (to the screen's edges),
    + New first. The one whose details are in the form has a ring; holding one opens its form. */

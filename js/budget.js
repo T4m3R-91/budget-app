@@ -8,7 +8,7 @@ import { state, byId } from "./state.js";
 import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate } from "./ui.js";
 import { parseAmount } from "./numbers.js";
 import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate } from "./db.js";
-import { paintRecurring, refreshRecurring } from "./recurring.js";
+import { paintRecurring, refreshRecurring, furthestDueMonth } from "./recurring.js";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const NOT_SET_UP = "Budgets aren't set up yet. Run budgets-migration.sql in Supabase to turn them on.";
@@ -60,6 +60,11 @@ export async function monthStatus(month) {
 // earliest: the month of your first entry, the furthest back the month switcher goes.
 const card = { month: null, next: null, earliest: null, data: new Map() };
 let built = false;
+
+// Recurring items (re)loaded: how far ahead the month switcher goes may have changed.
+window.addEventListener("recurringchange", () => {
+  if (document.getElementById("screen-budget")?.hidden === false) paintCard();
+});
 
 // The month the tab is showing (null before it's first opened), and opening it on a given month
 // next time: a recurring item's Edit or Log form returns to the month it was opened from.
@@ -132,8 +137,10 @@ function paintCard() {
   const { month } = card;
   const now = monthOf(isoLocal());
   const data = card.data.get(month);
-  // From the month of your first entry up to next month (which can be set ahead).
+  // From the month of your first entry up to next month (which can be set ahead), or further when a
+  // payment is scheduled further ahead.
   const earliest = card.earliest && card.earliest < now ? card.earliest : now;
+  const furthest = [shiftMonth(now, 1), furthestDueMonth()].sort().at(-1);
   const go = (by) => { card.month = shiftMonth(card.month, by); loadCardMonth(); };
   const when = data?.status === "ready" && data.budget.size ? whenText(month, now) : "";
   box.replaceChildren(
@@ -141,7 +148,7 @@ function paintCard() {
       el("div", { class: "bud-title" }, el("h3", { text: `${monthName(month)} ${month.slice(0, 4)}` }), when ? el("span", { text: when }) : null),
       el("div", { class: "month-nav" },
         el("button", { type: "button", class: "icon-btn", "aria-label": "Previous month", text: "‹", disabled: month <= earliest, onclick: () => go(-1) }),
-        el("button", { type: "button", class: "icon-btn", "aria-label": "Next month", text: "›", disabled: month >= shiftMonth(now, 1), onclick: () => go(1) }))),
+        el("button", { type: "button", class: "icon-btn", "aria-label": "Next month", text: "›", disabled: month >= furthest, onclick: () => go(1) }))),
     ...cardBody(month, now, data));
   paintRecurring(month); // the Recurring card follows the same month
 }
