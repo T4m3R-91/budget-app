@@ -1,6 +1,7 @@
 // Recurring items (rent, salary, subscriptions…) that repeat monthly or yearly. Nothing is logged
-// automatically: each due date shows on the Budget tab's Recurring card to Log (one tap, dated on
-// its due date at that day's rate, a flat 5 points) or Skip, and the Budget tab icon counts what's due. An entry typed
+// automatically: each due date shows on the Budget tab's Recurring card to Log (one tap, dated
+// today, or on a day picked with its ▾, at that day's rate; a flat 5 points) or Skip, and the
+// Budget tab icon counts what's due. An entry typed
 // by hand in the same month with the same category (or income source), currency and amount counts
 // as the item logged. Anything left open stays due (overdue) until it's logged or skipped.
 
@@ -79,9 +80,10 @@ export function recurringLabel(item) {
 
 // ---------- data ----------
 
-// handled: "itemId|due" → { status, amount, currency }, status "logged" (an entry was logged from
-// it) | "matched" (a hand-typed entry looks like it) | "skipped"; amount and currency are the
-// entry's, as actually logged. rate: EGP per USD, for the "Remaining recurring" total.
+// handled: "itemId|due" → { status, amount, currency, on }, status "logged" (an entry was logged
+// from it) | "matched" (a hand-typed entry looks like it) | "skipped"; amount, currency and on (its
+// date, as in History) are the entry's, as actually logged. rate: EGP per USD, for the
+// "Remaining recurring" total.
 const data = { status: "idle", items: [], handled: new Map(), rate: null, message: "" };
 const key = (itemId, due) => `${itemId}|${due}`;
 let loading = null;
@@ -101,7 +103,7 @@ async function load() {
     const ratePromise = currentRate();
     const { items, skips, links } = await fetchRecurring();
     const handled = new Map();
-    for (const l of links) handled.set(key(l.recurring_id, l.recurring_due_on), { status: "logged", amount: l.amount, currency: l.currency });
+    for (const l of links) handled.set(key(l.recurring_id, l.recurring_due_on), { status: "logged", amount: l.amount, currency: l.currency, on: l.occurred_on });
     for (const s of skips) if (!handled.has(key(s.item_id, s.due_on))) handled.set(key(s.item_id, s.due_on), { status: "skipped" });
 
     // Match entries typed by hand to occurrences still open: same month, type, category (or
@@ -120,7 +122,7 @@ async function load() {
           && (item.type === "expense" ? t.category_id === item.category_id : t.income_source_id === item.income_source_id));
         if (hit) {
           used.add(hit.id);
-          handled.set(key(item.id, due), { status: "matched", amount: hit.amount, currency: hit.currency });
+          handled.set(key(item.id, due), { status: "matched", amount: hit.amount, currency: hit.currency, on: hit.occurred_on });
         }
       }
     }
@@ -176,6 +178,7 @@ function paintBadge() {
 let viewMonth = null;
 let menuFor = null; // "itemId|due" of the row whose Edit / Remove menu is open
 let stopArmed = null; // "itemId|due" of the row waiting for a second tap on Remove
+const logDates = new Map(); // "itemId|due" → the date picked with Log's ▾ (otherwise: today)
 
 export function paintRecurring(month = viewMonth) {
   viewMonth = month;
@@ -225,8 +228,10 @@ function rowEl({ item, due }, today) {
   // Logged rows show what was actually logged; the rest, the item's current amount.
   const shown = data.handled.get(k)?.amount != null ? data.handled.get(k) : item;
   const amount = `${income ? "+" : "−"}${fmtMoney(shown.amount, shown.currency, { code: true })}`;
+  // Paid / received on the entry's own date, as History shows it (not the due date).
+  const paidOn = data.handled.get(k)?.on || due;
   const when = {
-    logged: `✓ Logged · ${shortDate(due)}`, skipped: `Skipped · ${shortDate(due)}`,
+    logged: `✓ ${income ? "Received" : "Paid"} · ${shortDate(paidOn)}`, skipped: `Skipped · ${shortDate(due)}`,
     overdue: `Overdue · ${shortDate(due)}`, due: "Due today", later: `Due ${shortDate(due)}`,
   }[status];
   const handled = status === "logged" || status === "skipped";
@@ -245,10 +250,12 @@ function rowEl({ item, due }, today) {
     details ? el("div", { class: "rec-details", text: details }) : null,
     el("div", { class: "rec-line" },
       el("span", { class: "rec-when", text: when }),
-      status === "due" || status === "overdue"
+      // Open (overdue, due or still to come, so a payment made early can be logged too):
+      // Skip, and "Log today │ ▾"; the ▾ is a calendar, and the button then reads "Log on 5 Sep".
+      status === "due" || status === "overdue" || status === "later"
         ? el("div", { class: "rec-actions" },
             el("button", { type: "button", class: "btn secondary small", text: "Skip", onclick: (e) => skipNow(item, due, e.currentTarget) }),
-            el("button", { type: "button", class: "btn primary small", text: "Log", onclick: (e) => logNow(item, due, e.currentTarget) }))
+            logButton(item, due, today))
         : status === "skipped"
           ? el("div", { class: "rec-actions" },
               el("button", { type: "button", class: "btn primary small", text: "Unskip", onclick: (e) => unskipNow(item, due, e.currentTarget) }))
@@ -261,6 +268,33 @@ function rowEl({ item, due }, today) {
             onclick: (e) => (stopArmed === k ? removeFrom(item, due, handled, e.currentTarget) : (stopArmed = k, paintRecurring())),
           }))
       : null);
+}
+
+// "Log today │ ▾": the ▾ is the phone's own date picker (an invisible date field over it, as on
+// the Add screen's On tile); picking a day makes the button "Log on 5 Sep".
+function logButton(item, due, today) {
+  const k = key(item.id, due);
+  const on = logDates.get(k) || today;
+  return el("div", { class: "split-btn" },
+    el("button", {
+      type: "button", class: "btn primary small", text: on === today ? "Log today" : `Log on ${shortDate(on)}`,
+      onclick: (e) => logNow(item, due, e.currentTarget, on),
+    }),
+    el("span", { class: "btn primary small split-date" }, el("span", { "aria-hidden": "true", text: "▾" }),
+      el("input", {
+        type: "date", value: on, "aria-label": "Date to log it on",
+        onchange: (e) => {
+          if (!e.target.value) return;
+          if (e.target.value === today) logDates.delete(k);
+          else logDates.set(k, e.target.value);
+          paintRecurring();
+        },
+        // With a mouse, a click on the (invisible) field doesn't open the calendar by itself.
+        onclick: (e) => {
+          if (!window.matchMedia("(pointer: fine)").matches) return;
+          try { e.currentTarget.showPicker(); } catch { /* older browsers: the field still takes typing */ }
+        },
+      })));
 }
 
 // Open items' total in the tab's currency (≈ when some are converted at today's rate); spending
@@ -288,9 +322,11 @@ function stillToCome(open) {
 
 // ---------- actions ----------
 
-async function logNow(item, due, button) {
+// Logs the occurrence due on `due` as an entry dated `on` (today, or the day picked with Log's ▾),
+// at that date's rate. Either way it counts as that occurrence logged, for a flat 5 points.
+async function logNow(item, due, button, on = isoLocal()) {
   button.disabled = true;
-  const rate = await rateFor(due);
+  const rate = await rateFor(on);
   if (!rate) {
     // No exchange rate to save with: open it in the form, where one can be typed in.
     toast("Couldn't get an exchange rate. Check it and save.");
@@ -300,14 +336,16 @@ async function logNow(item, due, button) {
   const expense = item.type === "expense";
   try {
     const saved = await insertTransaction({
-      type: item.type, occurred_on: due, amount: Number(item.amount), currency: item.currency,
+      type: item.type, occurred_on: on, amount: Number(item.amount), currency: item.currency,
       rate: rate.rate, rate_source: rate.source,
       category_id: expense ? item.category_id : null, subcategory_id: expense ? item.subcategory_id : null,
       income_source_id: expense ? null : item.income_source_id, payment_method_id: expense ? item.payment_method_id : null,
       who: item.who, description: item.description, recurring_id: item.id, recurring_due_on: due,
     });
     const pts = Number.isInteger(saved.points) ? saved.points : null;
-    toast(`Logged ${recurringLabel(item)} · ${fmtMoney(saved.amount, saved.currency, { code: true })}${pts ? ` · +${pts} pts` : ""}`, {
+    logDates.delete(key(item.id, due));
+    const dated = on === isoLocal() ? "today" : `on ${shortDate(on)}`;
+    toast(`Logged ${recurringLabel(item)} · ${fmtMoney(saved.amount, saved.currency, { code: true })} · ${dated}${pts ? ` · +${pts} pts` : ""}`, {
       label: "Undo",
       run: async () => {
         try {
