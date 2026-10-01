@@ -138,12 +138,27 @@ export function fetchRecurring() {
   });
 }
 
+// A payment scheduled once is frequency "once". Until scheduled-migration.sql has run, the database
+// refuses that; it's then saved as a yearly item that ends on its date: the same single payment.
+const onceRefused = (row, e) => row.frequency === "once" && e?.code === "23514" && /frequency|check/.test(e.message || "");
+const asYearlyOnce = (row) => ({ ...row, frequency: "yearly", month: Number(row.starts_on.slice(5, 7)), ended_on: row.starts_on });
+
 export async function insertRecurring(row) {
-  return unwrap(await sb.from("recurring_items").insert(row).select().single());
+  try {
+    return unwrap(await sb.from("recurring_items").insert(row).select().single());
+  } catch (e) {
+    if (onceRefused(row, e)) return insertRecurring(asYearlyOnce(row));
+    throw e;
+  }
 }
 
 export async function updateRecurring(id, patch) {
-  unwrap(await sb.from("recurring_items").update(patch).eq("id", id));
+  try {
+    unwrap(await sb.from("recurring_items").update(patch).eq("id", id));
+  } catch (e) {
+    if (onceRefused(patch, e) && patch.starts_on) return updateRecurring(id, asYearlyOnce(patch));
+    throw e;
+  }
 }
 
 export async function deleteRecurring(id) {

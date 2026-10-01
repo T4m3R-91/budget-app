@@ -41,8 +41,11 @@ export function ordinal(n) {
 }
 
 // The item's due date in a month, or null when it isn't due then. Days 29–31 fall on the last day
-// of shorter months.
+// of shorter months. A scheduled payment that doesn't repeat ("once") is due only on its date.
 function dueIn(item, month) {
+  if (item.frequency === "once") {
+    return firstOf(item.starts_on) === month && !(item.ended_on && item.starts_on > item.ended_on) ? item.starts_on : null;
+  }
   const year = Number(month.slice(0, 4));
   const m = Number(month.slice(5, 7));
   if (item.frequency === "yearly" && item.month !== m) return null;
@@ -110,13 +113,14 @@ export async function saveItemEdit(item, fields, date) {
     note = ` (${month} is already ${last.status === "skipped" ? "skipped" : item.type === "income" ? "received" : "paid"})`;
   }
 
-  // Nothing of it in the past yet: simply change it.
-  if (!last && !occurrencesThrough(item, addMonths(firstOf(from), -1)).length) {
+  // Nothing of it logged or in the past yet (or a one-time scheduled payment not logged yet):
+  // simply change it.
+  if (!last && (item.frequency === "once" || !occurrencesThrough(item, addMonths(firstOf(from), -1)).length)) {
     await updateRecurring(item.id, { ...fields, starts_on: from });
     return { from, note };
   }
   const endOld = dayBefore(firstOf(from));
-  const created = await insertRecurring({ ...fields, starts_on: from, ended_on: item.ended_on ?? null });
+  const created = await insertRecurring({ ...fields, starts_on: from, ended_on: "ended_on" in fields ? fields.ended_on : item.ended_on ?? null });
   try {
     await updateRecurring(item.id, { ended_on: item.ended_on && item.ended_on < endOld ? item.ended_on : endOld });
   } catch (e) {
@@ -127,6 +131,21 @@ export async function saveItemEdit(item, fields, date) {
 }
 
 // "🏠 Rent": the item's note if it has one, else its subcategory, category or income source.
+// The furthest month with a payment still to log (its next one, from today on): the Budget tab's
+// month switcher goes forward that far, so a payment scheduled months ahead can be seen.
+export function furthestDueMonth() {
+  return data.items.reduce((far, item) => {
+    const due = firstOpenDue(item);
+    return due && dueIn(item, firstOf(due)) === due && firstOf(due) > far ? firstOf(due) : far;
+  }, firstOf(isoLocal()));
+}
+
+// "monthly" | "yearly" | "once" for an item, or null when it isn't loaded.
+export const frequencyOf = (itemId) => data.items.find((i) => i.id === itemId)?.frequency ?? null;
+
+// "logged" | "matched" | "skipped" for an occurrence, or null while it's still open.
+export const handledStatus = (itemId, due) => data.handled.get(key(itemId, due))?.status ?? null;
+
 export function recurringLabel(item) {
   const source = item.type === "income" ? byId(state.incomeSources, item.income_source_id) : byId(state.categories, item.category_id);
   const name = item.description || byId(state.subcategories, item.subcategory_id)?.name || source?.name || "Unknown";
@@ -187,6 +206,7 @@ async function load() {
   }
   paintBadge();
   paintRecurring();
+  window.dispatchEvent(new Event("recurringchange")); // the Budget tab's month switcher follows
 }
 
 async function currentRate() {
