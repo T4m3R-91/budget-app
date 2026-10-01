@@ -5,7 +5,7 @@
 import { state, byId, memberName } from "./state.js";
 import { el, fmtMoney, friendlyDate, friendlyError, toast, parseISODate } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
-import { frequencyOf } from "./recurring.js";
+import { itemRepeats } from "./recurring.js";
 import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 import { pendingEntries, removePending } from "./outbox.js";
 
@@ -149,8 +149,8 @@ function row(t) {
   // Logged from a recurring item: which due date it settles ("↻ Due 1 Oct"), so a payment made in
   // another month still shows the month it belongs to. It's kept whole; the details before it
   // are shortened instead when the line is too long.
-  // (No ↻ for a one-time scheduled payment.)
-  const due = t.recurring_due_on ? `${detail ? "· " : ""}${frequencyOf(t.recurring_id) === "once" ? "" : "↻ "}Due ${plainDate(t.recurring_due_on)}` : null;
+  // (No ↻ for a payment scheduled just once.)
+  const due = t.recurring_due_on ? `${detail ? "· " : ""}${itemRepeats(t.recurring_id) ? "↻ " : ""}Due ${plainDate(t.recurring_due_on)}` : null;
   return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}` },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
