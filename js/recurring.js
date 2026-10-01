@@ -1,12 +1,12 @@
 // Recurring items (rent, salary, subscriptions…) that repeat monthly or yearly. Nothing is logged
 // automatically: each due date shows on the Budget tab's Recurring card to Log (one tap, dated on
-// its due date, a flat 5 points) or Skip, and the Budget tab icon counts what's due. An entry typed
+// its due date at that day's rate, a flat 5 points) or Skip, and the Budget tab icon counts what's due. An entry typed
 // by hand in the same month with the same category (or income source), currency and amount counts
 // as the item logged. Anything left open stays due (overdue) until it's logged or skipped.
 
 import { state, byId } from "./state.js";
 import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate } from "./ui.js";
-import { getLiveRate } from "./fx.js";
+import { getLiveRate, getRateOn } from "./fx.js";
 import {
   fetchRecurring, updateRecurring, skipOccurrence, unskipOccurrence, fetchUnlinkedBetween,
   insertTransaction, deleteTransaction, latestEntryRate,
@@ -140,6 +140,16 @@ async function currentRate() {
     if (last) return { rate: Number(last.rate), source: "last_entry" };
   } catch { /* offline */ }
   return null;
+}
+
+// The rate an entry dated on a day is saved with, as on the Add screen: that day's rate when it's
+// in the past (today's if that can't be had), otherwise today's.
+async function rateFor(date) {
+  if (date < isoLocal()) {
+    const day = await getRateOn(date);
+    if (day) return { rate: day.rate, source: "historical" };
+  }
+  return currentRate();
 }
 
 function statusOf(item, due, today) {
@@ -280,7 +290,7 @@ function stillToCome(open) {
 
 async function logNow(item, due, button) {
   button.disabled = true;
-  const rate = await currentRate();
+  const rate = await rateFor(due);
   if (!rate) {
     // No exchange rate to save with: open it in the form, where one can be typed in.
     toast("Couldn't get an exchange rate. Check it and save.");

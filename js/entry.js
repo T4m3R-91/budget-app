@@ -1,5 +1,5 @@
 // The Add / Edit screen: amount + category are the only required inputs; everything else
-// is defaulted (date today, EGP, you, last payment method, live rate) and editable.
+// is defaulted (date today, EGP, you, last payment method, the rate for the date) and editable.
 // The same form also logs a recurring item's due date after changing it (#log/…), and edits a
 // recurring item itself (#recurring/…). The ↻ strip on the On tile makes a new entry repeat.
 
@@ -7,7 +7,7 @@ import { state, byId, subcategoriesOf } from "./state.js";
 import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
 import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
-import { getLiveRate } from "./fx.js";
+import { getLiveRate, getRateOn } from "./fx.js";
 import {
   insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
   insertRecurring, updateRecurring, deleteRecurring, linkToRecurring,
@@ -56,6 +56,8 @@ function freshForm(type = "expense") {
     mode: "add", id: null, original: null,
     type, amountText: "", currency: "EGP",
     rate: null, rateSource: null, rateNote: "", rateLoading: false, editingRate: false,
+    rateFallback: false, // today's rate standing in for a past day's (see ensureRate)
+    dayRate: null, // editing: { date, rate } of the entry's day, when it differs from the saved rate
     categoryId: null, subcategoryId: null, sourceId: null,
     paymentMethodId: rememberedPayment(), receivingMethodId: rememberedReceiving(), who: state.me.email,
     date: isoLocal(), description: "",
@@ -171,39 +173,88 @@ export async function showEdit(id) {
     who: t.who, date: t.occurred_on, description: t.description || "",
   };
   render();
+  checkDayRate();
 }
 
 // ---------- exchange rate ----------
 
+// The rate follows the entry's date: a past date takes that day's rate ("rate on 1 Sept"); today
+// and later dates take today's live rate. When the day's rate can't be had (offline, before March
+// 2024, the service down), today's stands in, marked rateFallback and shown in orange; an entry
+// saved offline that way gets its day's rate when it syncs (outbox.js). A rate you typed stays.
+const isPast = (iso) => iso < isoLocal();
+const dayRateNote = (iso) => (relativeDay(iso) === "yesterday" ? "yesterday's rate" : `rate on ${relativeDay(iso)}`);
+const useDayRate = (iso) => `Use ${relativeDay(iso)}'s rate`;
+const typedRate = (form) => form.rateSource === "edited" || form.rateSource === "manual";
+
 async function ensureRate({ force = false } = {}) {
   const form = f;
   if (!form || form.mode !== "add") return;
-  const userSet = () => form.rateSource === "edited" || form.rateSource === "manual";
+  const date = form.date;
+  const outdated = () => form !== f || form.date !== date; // a newer call takes over
   form.rateLoading = true;
   renderRate();
 
-  const live = await getLiveRate({ force }); // offline: the last one fetched, if any
-  if (form !== f || userSet()) return;
-
-  if (live) {
-    Object.assign(form, { rate: live.rate, rateSource: "live", rateNote: `live, ${relativeDay(isoLocal(live.asOf))}` });
-  } else {
-    let last = null;
-    try { last = await latestEntryRate(); } catch { /* offline too */ }
-    if (form !== f || userSet()) return;
-    if (last) {
+  const day = isPast(date) ? await getRateOn(date) : null;
+  if (outdated()) return;
+  if (!typedRate(form) && day) {
+    Object.assign(form, { rate: day.rate, rateSource: "historical", rateNote: dayRateNote(date), rateFallback: false });
+  } else if (!typedRate(form)) {
+    const live = await getLiveRate({ force }); // offline: the last one fetched, if any
+    if (outdated()) return;
+    const instead = isPast(date) ? `, ${relativeDay(date)}'s unavailable` : "";
+    if (typedRate(form)) {
+      /* typed meanwhile: it stays */
+    } else if (live) {
+      const asOf = relativeDay(isoLocal(live.asOf));
       Object.assign(form, {
-        rate: Number(last.rate), rateSource: "last_entry",
-        rateNote: `last entry's (${relativeDay(last.occurred_on)}), live rate unavailable`,
+        rate: live.rate, rateSource: "live", rateFallback: Boolean(instead),
+        rateNote: instead ? `${asOf === "today" ? "today's rate" : `rate from ${asOf}`}${instead}` : `live, ${asOf}`,
       });
-    } else if (!form.rate) {
-      Object.assign(form, { rateSource: null, rateNote: "live rate unavailable" });
+    } else {
+      let last = null;
+      try { last = await latestEntryRate(); } catch { /* offline too */ }
+      if (outdated()) return;
+      if (typedRate(form)) {
+        /* typed meanwhile: it stays */
+      } else if (last) {
+        Object.assign(form, {
+          rate: Number(last.rate), rateSource: "last_entry", rateFallback: Boolean(instead),
+          rateNote: `last entry's (${relativeDay(last.occurred_on)}), live rate unavailable`,
+        });
+      } else if (!form.rate) {
+        Object.assign(form, { rateSource: null, rateNote: "live rate unavailable" });
+      }
     }
   }
   form.rateLoading = false;
   renderRate();
   renderConverted();
   if (form.currency === "USD") renderGrid(); // USD budget figures use this rate
+}
+
+// Editing an entry keeps its saved rate; when its date's own rate differs, the rate line offers
+// "Use 1 Sept's rate (50.92)" (and nothing changes unless you tap it and save).
+async function checkDayRate() {
+  const form = f;
+  if (!form || form.mode !== "edit") return;
+  const date = form.date;
+  form.dayRate = null;
+  renderRate();
+  if (!isPast(date)) return;
+  const day = await getRateOn(date);
+  if (form !== f || form.date !== date || !day) return;
+  form.dayRate = { date, rate: day.rate };
+  renderRate();
+}
+
+// The entry's date changed: the rate follows it, unless you typed one (then "Use 1 Sept's rate"
+// is offered); an edited entry keeps its saved rate and is offered the day's.
+function rateFollowsDate() {
+  if (f.mode === "edit") return checkDayRate();
+  if (f.mode !== "add") return;
+  if (typedRate(f)) return renderRate();
+  ensureRate();
 }
 
 // ---------- rendering ----------
@@ -363,21 +414,28 @@ function renderRate() {
     return;
   }
 
-  const warn = !f.rateLoading && (!f.rate || f.rateSource === "last_entry");
-  let line = f.rate ? `1 USD = ${fmtRate(f.rate)} EGP` : f.rateLoading ? "Getting today's rate…" : "No rate yet";
-  if (f.rateNote && !(f.rateLoading && !f.rate)) line += ` · ${f.rateNote}`;
+  const warn = !f.rateLoading && (!f.rate || f.rateSource === "last_entry" || f.rateFallback);
+  const loading = f.mode === "add" && isPast(f.date) ? `Getting ${relativeDay(f.date)}'s rate…` : "Getting today's rate…";
+  let line = f.rateLoading ? loading : f.rate ? `1 USD = ${fmtRate(f.rate)} EGP` : "No rate yet";
+  if (f.rateNote && !f.rateLoading) line += ` · ${f.rateNote}`;
 
+  const link = (text, onclick) => el("button", { type: "button", class: "link-btn", text, onclick });
   const parts = [
     el("span", { class: "rate-line" + (warn ? " warn" : ""), text: line }),
-    el("button", {
-      type: "button", class: "link-btn", text: f.rate ? "Edit" : "Enter rate",
-      onclick: () => { f.editingRate = true; renderRate(); },
-    }),
+    link(f.rate ? "Edit" : "Enter rate", () => { f.editingRate = true; renderRate(); }),
   ];
-  if (f.mode === "add" && ["edited", "manual", "last_entry"].includes(f.rateSource)) {
-    parts.push(el("button", {
-      type: "button", class: "link-btn", text: "Use live",
-      onclick: () => { f.rateSource = null; f.rateNote = ""; ensureRate({ force: true }); },
+  // Back to the rate the date calls for: that day's for a past date, else today's live one.
+  if (f.mode === "add" && (["edited", "manual", "last_entry"].includes(f.rateSource) || f.rateFallback)) {
+    parts.push(link(isPast(f.date) ? useDayRate(f.date) : "Use live", () => {
+      Object.assign(f, { rateSource: null, rateNote: "", rateFallback: false });
+      ensureRate({ force: true });
+    }));
+  }
+  if (f.mode === "edit" && f.dayRate?.date === f.date && Math.abs(f.dayRate.rate - f.rate) >= 0.00005) {
+    parts.push(link(`${useDayRate(f.date)} (${fmtRate(f.dayRate.rate)})`, () => {
+      Object.assign(f, { rate: f.dayRate.rate, rateSource: "historical", rateNote: dayRateNote(f.date) });
+      renderRate();
+      renderConverted();
     }));
   }
   box.replaceChildren(...parts);
@@ -515,6 +573,7 @@ function onTile() {
       const monthChanged = monthOf(e.target.value) !== monthOf(f.date);
       f.date = e.target.value;
       renderMeta();
+      rateFollowsDate();
       if (monthChanged) { renderGrid(); loadBudgetTiles(); } // the tiles show that month's budget
     },
     // With a mouse, a click on the (invisible) field doesn't open the calendar by itself.
@@ -612,7 +671,7 @@ async function save_() {
   }
   const missing = missingFields();
   if (missing.length) return flag(missing);
-  if (f.rateLoading && !(f.rate > 0)) return toast("Getting today's exchange rate. Try again in a moment.");
+  if (f.rateLoading) return toast("Getting the exchange rate. Try again in a moment.");
   // Offline, only new entries can be saved (they wait on the phone); changes need a connection.
   if (!navigator.onLine && (f.mode === "edit" || f.mode === "recur")) return toast("Saving changes needs a connection. Try again when you're online.");
   if (!navigator.onLine && f.repeat) return toast("Setting a repeat needs a connection. Set Repeat to Never to save it on this phone now.");
@@ -702,10 +761,12 @@ async function save_() {
   }
 }
 
-// No connection: the entry waits on the phone and syncs when you're back online.
+// No connection: the entry waits on the phone and syncs when you're back online. A past-dated one
+// saved with today's rate standing in for its day's (not a rate you typed) is marked, so it gets
+// its day's rate when it syncs.
 async function saveOffline(form, row, repeatDropped = false) {
   try {
-    await queueEntry(row);
+    await queueEntry(form.rateFallback && !typedRate(form) && isPast(row.occurred_on) ? { ...row, rate_pending: true } : row);
   } catch (e) {
     form.saving = false;
     if (form === f) renderSaveButton();
@@ -735,7 +796,7 @@ function afterSave(form, row) {
     budgetTiles.spent.set(row.category_id, (budgetTiles.spent.get(row.category_id) || 0) + egp);
     budgetTiles.spentUsd.set(row.category_id, (budgetTiles.spentUsd.get(row.category_id) || 0) + inUsd);
   }
-  const keepLive = form.rateSource === "live";
+  const keepLive = form.rateSource === "live" && !form.rateFallback; // the next entry is dated today
   f = freshForm(form.type);
   if (keepLive) Object.assign(f, { rate: form.rate, rateSource: "live", rateNote: form.rateNote });
   render();
@@ -849,5 +910,6 @@ async function runScan(file) {
 // ---------- connectivity ----------
 
 window.addEventListener("online", () => {
-  if (f && !screen().hidden && f.mode === "add" && !f.rate) ensureRate();
+  // Back online: a missing rate, or today's standing in for a past day's, can now be fetched.
+  if (f && !screen().hidden && f.mode === "add" && (!f.rate || f.rateFallback)) ensureRate();
 });

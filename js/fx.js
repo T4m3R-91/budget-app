@@ -1,4 +1,5 @@
-// Live USD -> EGP rate from free public services (they update about once a day).
+// Live USD -> EGP rate from free public services (they update about once a day), and a past
+// day's rate for entries dated in the past.
 // Tries each source in turn; returns null if none answer, and the entry form falls back.
 
 import { round4 } from "./numbers.js";
@@ -41,6 +42,33 @@ const SOURCES = [
     throw new Error("unavailable");
   },
 ];
+
+// A past day's rate, for entries dated in the past: the same free API keeps a daily snapshot,
+// back to 2 March 2024. Resolves { rate, asOf: Date } or null (offline, an earlier date, or the
+// service can't be reached). A past day's rate never changes, so each is fetched once per session.
+const FIRST_DAY = "2024-03-02";
+const dayRates = new Map();
+
+export async function getRateOn(iso) {
+  if (dayRates.has(iso)) return dayRates.get(iso);
+  if (!navigator.onLine || iso < FIRST_DAY) return null;
+  for (const url of [
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${iso}/v1/currencies/usd.min.json`,
+    `https://${iso}.currency-api.pages.dev/v1/currencies/usd.min.json`,
+  ]) {
+    try {
+      const j = await fetchJSON(url);
+      if (j?.usd?.egp > 0) {
+        const day = { rate: round4(j.usd.egp), asOf: parseISODate(j.date || iso) };
+        dayRates.set(iso, day);
+        return day;
+      }
+    } catch {
+      /* try the mirror */
+    }
+  }
+  return null;
+}
 
 // The last rate fetched is also kept on the phone, so an entry logged offline can use it; the
 // Add screen labels it with its date ("live, 29 Sept"), as it does any rate.
