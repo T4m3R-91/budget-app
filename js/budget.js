@@ -81,7 +81,7 @@ export function showBudget() {
         el("h2", { text: "Budget" }),
         el("div", { id: "b-cur", class: "seg small", role: "group", "aria-label": "Show amounts in" })),
       el("section", { class: "card budget-card", id: "b-card", "aria-label": "Budget" }),
-      el("section", { class: "card budget-card", id: "r-card", "aria-label": "Recurring" }));
+      el("section", { class: "card budget-card", id: "r-card", "aria-label": "Scheduled" }));
   }
   paintCurrency();
   card.month = card.next ?? monthOf(isoLocal());

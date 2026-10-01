@@ -15,7 +15,7 @@ const EMPTY = { "1m": "No entries in the last 30 days.", "1y": "No entries in th
 const view = {
   rows: [],
   currency: "EGP",
-  range: "max", // the trend chart's window; kept while the app is open
+  range: "1m", // the trend chart's window (opens on the last 30 days); kept while the app is open
 };
 let trendChart = null;
 let built = false;

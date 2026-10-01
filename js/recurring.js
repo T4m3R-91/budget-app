@@ -15,7 +15,7 @@ import {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const NOT_SET_UP = "Recurring items aren't set up yet. Run recurring-migration.sql in Supabase to turn them on.";
+const NOT_SET_UP = "Scheduled payments aren't set up yet. Run recurring-migration.sql in Supabase to turn them on.";
 // The tables or columns don't exist until recurring-migration.sql has run.
 const isMissing = (e) => ["42P01", "42703", "PGRST205", "PGRST204", "PGRST202"].includes(e?.code);
 
@@ -140,8 +140,23 @@ export function furthestDueMonth() {
   }, firstOf(isoLocal()));
 }
 
-// "monthly" | "yearly" | "once" for an item, or null when it isn't loaded.
-export const frequencyOf = (itemId) => data.items.find((i) => i.id === itemId)?.frequency ?? null;
+// Whether an item happens more than once: monthly or yearly, with a second due date before its
+// end (an Until that leaves a single date doesn't count).
+function repeats(item) {
+  if (item.frequency === "once") return false;
+  if (!item.ended_on) return true;
+  let month = addMonths(firstOf(item.starts_on), 1);
+  for (let i = 0; i < 12 && month <= item.ended_on; i++, month = addMonths(month, 1)) {
+    if (dueIn(item, month)) return true;
+  }
+  return false;
+}
+
+// Whether the item an entry was logged from repeats (true while the items aren't loaded yet).
+export function itemRepeats(itemId) {
+  const item = data.items.find((i) => i.id === itemId);
+  return item ? repeats(item) : true;
+}
 
 // "logged" | "matched" | "skipped" for an occurrence, or null while it's still open.
 export const handledStatus = (itemId, due) => data.handled.get(key(itemId, due))?.status ?? null;
@@ -157,7 +172,7 @@ export function recurringLabel(item) {
 // handled: "itemId|due" → { status, amount, currency, on }, status "logged" (an entry was logged
 // from it) | "matched" (a hand-typed entry looks like it) | "skipped"; amount, currency and on (its
 // date, as in History) are the entry's, as actually logged. rate: EGP per USD, for the
-// "Remaining recurring" total.
+// "Upcoming in <month>" total.
 const data = { status: "idle", items: [], handled: new Map(), rate: null, message: "" };
 const key = (itemId, due) => `${itemId}|${due}`;
 let loading = null;
@@ -259,18 +274,18 @@ export function paintRecurring(month = viewMonth) {
   viewMonth = month;
   const box = document.getElementById("r-card");
   if (!box || !month) return;
-  box.replaceChildren(el("div", { class: "card-head" }, el("h3", { text: "Recurring" })), ...cardBody(month));
+  box.replaceChildren(el("div", { class: "card-head" }, el("h3", { text: "Scheduled" })), ...cardBody(month));
 }
 
 function cardBody(month) {
   if (data.status === "idle") return [el("p", { class: "muted small", text: "Loading…" })];
   if (data.status === "missing") return [el("p", { class: "muted small", text: NOT_SET_UP })];
   if (data.status === "error") {
-    return [el("p", { class: "muted small" }, `Couldn't load recurring items. ${data.message} `,
+    return [el("p", { class: "muted small" }, `Couldn't load scheduled payments. ${data.message} `,
       el("button", { type: "button", class: "link-btn", text: "Try again", onclick: refreshRecurring }))];
   }
   if (!data.items.length) {
-    return [el("p", { class: "muted small", text: "Nothing repeats yet. When adding an entry, tap ↻ on the On tile to repeat it monthly or yearly." })];
+    return [el("p", { class: "muted small", text: "Nothing scheduled yet. When adding an entry, pick a future date, or tap ↻ on the On tile to repeat it monthly or yearly." })];
   }
 
   const today = isoLocal();
@@ -284,14 +299,14 @@ function cardBody(month) {
     ...earlier.sort((a, b) => a.due.localeCompare(b.due)),
     ...data.items.map((item) => ({ item, due: dueIn(item, month) })).filter((o) => o.due).sort((a, b) => a.due.localeCompare(b.due)),
   ];
-  if (!rows.length) return [el("p", { class: "muted small", text: `Nothing recurring in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}.` })];
+  if (!rows.length) return [el("p", { class: "muted small", text: `Nothing scheduled in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}.` })];
 
   const open = rows.filter((o) => ["overdue", "due", "later"].includes(statusOf(o.item, o.due, today)));
   return [
     el("ul", { class: "rec-list" }, rows.map((o) => rowEl(o, today))),
     open.length
       ? el("p", { class: "rec-left" },
-          el("span", { text: `Remaining recurring in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}` }), el("span", { text: stillToCome(open) }))
+          el("span", { text: `Upcoming in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}` }), el("span", { text: stillToCome(open) }))
       : null,
   ].filter(Boolean);
 }
@@ -314,9 +329,11 @@ function rowEl({ item, due }, today) {
   // every one up to the last logged or skipped, wherever the menu was opened).
   const ending = removalEnd(item, due, handled);
   const removeLabel = ending.after ? `Remove after ${shortDate(ending.after)}` : `Remove from ${shortDate(due)} on`;
-  // As in History: the category (or income source) as the title, then subcategory · note.
+  // As in History: the category (or income source) as the title, then subcategory · note, and
+  // for a payment that repeats, how often ("↻ Monthly").
   const source = income ? byId(state.incomeSources, item.income_source_id) : byId(state.categories, item.category_id);
-  const details = [byId(state.subcategories, item.subcategory_id)?.name, item.description].filter(Boolean).join(" · ");
+  const every = repeats(item) ? `↻ ${item.frequency === "yearly" ? "Yearly" : "Monthly"}` : null;
+  const details = [byId(state.subcategories, item.subcategory_id)?.name, item.description, every].filter(Boolean).join(" · ");
   return el("li", { class: `rec-row ${status} ${income ? "income" : "expense"}` },
     el("div", { class: "rec-line" },
       el("button", {

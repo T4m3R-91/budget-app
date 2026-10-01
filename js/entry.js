@@ -295,7 +295,7 @@ function render() {
   const titled = (back, title) => el("div", { class: "entry-head" }, back, el("h2", { text: title }), el("span"));
   const head =
     f.mode === "edit" ? titled(el("a", { class: "link-btn", href: "#history", text: "Cancel" }), income ? "Edit income" : "Edit expense")
-    : f.mode === "recur" ? titled(backToBudget(), "Edit recurring")
+    : f.mode === "recur" ? titled(backToBudget(), "Edit scheduled")
     : f.mode === "fav" ? titled(el("a", { class: "link-btn", href: "#add", text: "Cancel" }), f.fav.id ? "Edit favorite" : "New favorite")
     : f.recurring ? titled(backToBudget(), `Log ${recurringLabel(f.recurring.item)}`)
     : el("div", { class: "entry-head centered" }, typeSeg());
