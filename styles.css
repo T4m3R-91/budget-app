@@ -733,6 +733,9 @@ a.btn { display: inline-block; text-decoration: none; }
 .switch:disabled { opacity: 0.5; }
 .stack { display: grid; gap: 10px; }
 .app-version { text-align: center; color: var(--faint); font-size: 12px; }
+/* Profile → Download: when the nightly backup last ran; orange when it's late. */
+.backup-line { margin: 10px 0 0; text-align: center; }
+.backup-line.stale { color: var(--warn); }
 
 /* ---------- tab bar & toast ---------- */
 #tabbar {
