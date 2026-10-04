@@ -226,7 +226,23 @@ export async function forgetPushDevice(endpoint) {
   unwrap(await sb.from("push_subscriptions").delete().eq("endpoint", endpoint));
 }
 
-// Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed }.
+// Your notification settings, for all your devices (reminders-migration.sql): { reminders,
+// reminder_hour, show_amounts, time_zone }, or null when you have no row yet (the defaults apply).
+// "missing" until the migration has run.
+export function fetchNotifySettings() {
+  return cached(`notify-settings:${state.me?.email}`, async () => {
+    const { data, error } = await sb.from("notification_settings").select("reminders, reminder_hour, show_amounts, time_zone").maybeSingle();
+    if (isMissingTable(error)) return "missing";
+    return unwrap({ data, error });
+  });
+}
+
+export async function saveNotifySettings(patch) {
+  unwrap(await sb.from("notification_settings").upsert({ owner: state.me.email, ...patch, updated_at: new Date().toISOString() }));
+}
+
+// Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed,
+// reminder } (reminder: how many were due, when the test was today's reminder).
 // Its own error message ("The push keys aren't set…") is passed on.
 export async function callNotify(action) {
   const { data, error } = await sb.functions.invoke("notify", { body: { action } });

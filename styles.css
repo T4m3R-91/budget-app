@@ -689,8 +689,15 @@ a.btn { display: inline-block; text-decoration: none; }
 .lb-star { font-size: 16px; text-align: center; }
 .lb-pts { color: var(--muted); font-variant-numeric: tabular-nums; }
 .lb-row.leader .lb-name, .lb-row.leader .lb-pts { color: var(--text); font-weight: 600; }
-/* Notifications (Profile): this device's on/off switch, then the test button. */
+/* Notifications (Profile): this device's switch, your reminder settings (divided rows), then the
+   test button. */
 .push-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.push-row + .push-row { padding-top: 12px; border-top: 1px solid var(--line); }
+.push-note { margin: -4px 0 12px; }
+.hour-select {
+  margin-left: 2px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel2); color: var(--text); font-family: inherit; font-size: 16px; font-weight: 600;
+}
 .push-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .push-title { font-weight: 600; }
 .switch {

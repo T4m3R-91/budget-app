@@ -3,7 +3,7 @@
 
 import { state } from "./state.js";
 import { el, toast, friendlyError } from "./ui.js";
-import { sb, fetchLeaderboard } from "./db.js";
+import { sb, fetchLeaderboard, fetchNotifySettings, saveNotifySettings } from "./db.js";
 import { settingsCard } from "./settings.js";
 import { exportToExcel } from "./export.js";
 import { appVersion } from "./offline.js";
@@ -26,6 +26,7 @@ export function showProfile() {
     el("p", { class: "app-version", id: "app-version", text: versionLine() }));
   loadBoard();
   paintPush();
+  loadPrefs();
   prepareKey();
   if (!version) appVersion().then((v) => {
     version = v;
@@ -146,18 +147,87 @@ async function paintPush() {
       : now === "on" ? `On. Notifications come to ${here()}.`
       : now === "blocked" ? blockedHelp()
       : `Off. Turn on to get notifications on ${here()}.`;
-    toggle = el("button", {
-      type: "button", class: "switch", role: "switch", "aria-checked": String(on), "aria-label": `Notifications on ${here()}`,
-      disabled: Boolean(pushBusy) || now === "blocked", onclick: () => flipPush(on),
-    });
+    toggle = switchEl(on, `Notifications on ${here()}`, () => flipPush(on), Boolean(pushBusy) || now === "blocked");
   }
   document.getElementById("push-box")?.replaceChildren(
-    el("div", { class: "push-row" },
-      el("div", { class: "push-text" },
-        el("span", { class: "push-title", text: here().replace(/^t/, "T") }),
-        el("span", { class: "muted small", text: line })),
-      toggle),
+    pushRow(here().replace(/^t/, "T"), el("span", { class: "muted small", text: line }), toggle),
+    ...prefRows(),
     testButton());
+}
+
+const pushRow = (title, line, control) =>
+  el("div", { class: "push-row" },
+    el("div", { class: "push-text" }, el("span", { class: "push-title", text: title }), line),
+    control);
+
+const switchEl = (on, label, onclick, disabled = false) =>
+  el("button", { type: "button", class: "switch", role: "switch", "aria-checked": String(on), "aria-label": label, disabled, onclick });
+
+// ---------- your settings, for all your devices (reminders-migration.sql) ----------
+
+const DEFAULT_PREFS = { reminders: true, reminder_hour: 9, show_amounts: true };
+let prefs = { status: "loading" }; // loading | ready | missing | error, plus the settings when ready
+const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo";
+
+async function loadPrefs() {
+  if (prefs.email !== state.me.email) prefs = { status: "loading", email: state.me.email };
+  try {
+    const row = await fetchNotifySettings();
+    if (row === "missing") prefs = { status: "missing", email: state.me.email };
+    else {
+      prefs = { status: "ready", email: state.me.email, ...DEFAULT_PREFS, ...(row || {}) };
+      // Reminders come at the hour where you are: this phone's time zone, if it's new.
+      if (navigator.onLine && row?.time_zone !== timeZone()) saveNotifySettings({ time_zone: timeZone() }).catch(() => {});
+    }
+  } catch (e) {
+    prefs = { status: "error", email: state.me.email, message: friendlyError(e) };
+  }
+  paintPush();
+}
+
+// Saved at once; put back if that fails.
+async function setPref(patch) {
+  if (!navigator.onLine) {
+    toast("Changing notification settings needs a connection.");
+    return paintPush();
+  }
+  const before = prefs;
+  prefs = { ...prefs, ...patch };
+  paintPush();
+  try {
+    await saveNotifySettings({ ...patch, time_zone: timeZone() });
+  } catch (e) {
+    prefs = before;
+    paintPush();
+    toast(friendlyError(e));
+  }
+}
+
+// "9:00 AM", "12:00 PM", "12:00 AM" (midnight).
+const hourLabel = (h) => `${h % 12 || 12}:00 ${h < 12 ? "AM" : "PM"}`;
+
+function prefRows() {
+  const note = (text, ...more) => [el("p", { class: "muted small push-note" }, text, ...more)];
+  if (prefs.status === "loading") return note("Loading your reminder settings…");
+  if (prefs.status === "missing") return note("Reminders aren't set up yet. Run reminders-migration.sql in Supabase.");
+  if (prefs.status === "error") {
+    return note(`Couldn't load your reminder settings. ${prefs.message} `,
+      el("button", { type: "button", class: "link-btn", text: "Try again", onclick: loadPrefs }));
+  }
+  const hour = el("select", {
+    class: "hour-select", "aria-label": "Reminder time", value: String(prefs.reminder_hour),
+    onchange: (e) => setPref({ reminder_hour: Number(e.target.value) }),
+  }, Array.from({ length: 24 }, (_, h) => el("option", { value: String(h), text: hourLabel(h) })));
+  return [
+    pushRow("Reminders",
+      prefs.reminders
+        ? el("span", { class: "muted small" }, "What's due today or overdue, every day at ", hour)
+        : el("span", { class: "muted small", text: "Off. No reminders are sent." }),
+      switchEl(prefs.reminders, "Reminders", () => setPref({ reminders: !prefs.reminders }))),
+    pushRow("Show amounts",
+      el("span", { class: "muted small", text: prefs.show_amounts ? "In notifications: 🏠 Rent · EGP 12,000." : "Off. Notifications show names only." }),
+      switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
+  ];
 }
 
 function flipPush(wasOn) {
@@ -175,10 +245,13 @@ function flipPush(wasOn) {
 
 const devices = (n) => `${n} device${n === 1 ? "" : "s"}`;
 
-function testResult({ devices: total, sent, removed, failed = [] }) {
+// When something's due (and reminders are on), the test is today's reminder, as it comes in the
+// morning; otherwise a plain "It works".
+function testResult({ devices: total, sent, removed, failed = [], reminder }) {
   if (!total) return "None of your devices has notifications on yet. Turn them on above first.";
   const parts = [];
-  if (sent) parts.push(`Sent to ${devices(sent)}. It should arrive in a few seconds.`);
+  if (sent && reminder) parts.push(`Sent today's reminder (${reminder} due) to ${devices(sent)}.`);
+  else if (sent) parts.push(`Sent to ${devices(sent)}. It should arrive in a few seconds.`);
   if (removed) parts.push(`Removed ${devices(removed)} that no longer take${removed === 1 ? "s" : ""} notifications.`);
   if (failed.length) parts.push(`Couldn't reach ${devices(failed.length)} (${failed[0].slice(0, 60)}).`);
   if (!sent && removed && !failed.length) parts.push("Turn them on again above.");
