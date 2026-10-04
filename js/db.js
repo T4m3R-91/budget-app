@@ -244,6 +244,22 @@ export async function saveNotifySettings(patch) {
   if (error) throw error;
 }
 
+// Your notification center (inbox-migration.sql): what was sent to you in the last 30 days, newest
+// first: [{ id, kind, title, body, url, created_at, read_at }]. null until the migration has run.
+export function fetchInbox() {
+  return cached(`inbox:${state.me?.email}`, async () => {
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data, error } = await sb.from("notifications").select("id, kind, title, body, url, created_at, read_at")
+      .gte("created_at", since).order("created_at", { ascending: false }).limit(300);
+    if (isMissingTable(error)) return null;
+    return unwrap({ data, error });
+  });
+}
+
+export async function markInboxRead() {
+  unwrap(await sb.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null));
+}
+
 // Right after you save something new: the notify function tells the rest of the household.
 // kind: "entry", "repeat" (an entry set to repeat), "log" (a scheduled payment logged) with the
 // entry's id, or "scheduled" with the scheduled payment's id. Nothing waits for it, and nothing

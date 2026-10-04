@@ -6,7 +6,7 @@
 // phone then fetches the new files in the background and the app offers "Reload". Profile shows
 // this version, so it always names the files actually running on the phone.
 
-const VERSION = "2.11.0";
+const VERSION = "2.12.1";
 const APP = `app-${VERSION}`;
 const LIBS = "libs"; // CDN libraries: their URLs name their version, so they're kept across releases
 
@@ -14,15 +14,18 @@ const FILES = [
   "./", "index.html", "styles.css", "config.js", "manifest.webmanifest",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
   "js/app.js", "js/budget.js", "js/dashboard.js", "js/db.js", "js/entry.js", "js/export.js",
-  "js/filters.js", "js/fx.js", "js/history.js", "js/numbers.js", "js/offline.js", "js/outbox.js",
+  "js/filters.js", "js/fx.js", "js/history.js", "js/inbox.js", "js/numbers.js", "js/offline.js", "js/outbox.js",
   "js/profile.js", "js/push.js", "js/receipt-parse.js", "js/receipt.js", "js/recurring.js", "js/settings.js",
   "js/state.js", "js/store.js", "js/ui.js",
 ];
 const LIB_HOSTS = ["cdn.jsdelivr.net", "cdn.sheetjs.com"];
 
 self.addEventListener("install", (event) => {
-  // cache: "reload" skips the browser's own cache, so a release never picks up stale copies.
-  event.waitUntil(caches.open(APP).then((cache) => cache.addAll(FILES.map((f) => new Request(f, { cache: "reload" })))));
+  // cache: "reload" skips the browser's own cache, and ?v=<version> skips any copy GitHub Pages'
+  // servers still hold from before the upload (they keep files up to 10 minutes), so a release
+  // never mixes new files with stale ones. The files are found again without the ?v (ignoreSearch).
+  event.waitUntil(caches.open(APP).then((cache) =>
+    cache.addAll(FILES.map((f) => new Request(`${f}?v=${VERSION}`, { cache: "reload" })))));
 });
 
 self.addEventListener("activate", (event) => {
@@ -52,7 +55,7 @@ const isLib = (url, req) => LIB_HOSTS.includes(url.hostname) && req.cache !== "n
 
 async function appFile(req) {
   const cache = await caches.open(APP);
-  const hit = (await cache.match(req, { ignoreSearch: true })) || (req.mode === "navigate" ? await cache.match("index.html") : null);
+  const hit = (await cache.match(req, { ignoreSearch: true })) || (req.mode === "navigate" ? await cache.match("index.html", { ignoreSearch: true }) : null);
   return hit || fetch(req);
 }
 
@@ -97,6 +100,8 @@ self.addEventListener("push", (event) => {
       data: { url: msg.url || "./" },
     }),
     typeof msg.badge === "number" ? iconBadge(msg.badge) : null,
+    // An open app updates its bell (the notification center already has it).
+    self.clients.matchAll({ type: "window" }).then((wins) => wins.forEach((w) => w.postMessage({ type: "pushed" }))),
   ]));
 });
 
