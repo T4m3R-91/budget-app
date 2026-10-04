@@ -1,5 +1,5 @@
-// Profile: your account (password, sign-out), your points and the household leaderboard, the
-// Settings card (collapsed until opened), and the Excel download.
+// Profile: your account (password, sign-out), your points and the household leaderboard,
+// notifications on this device, the Settings card (collapsed until opened), and the Excel download.
 
 import { state } from "./state.js";
 import { el, toast, friendlyError } from "./ui.js";
@@ -7,6 +7,7 @@ import { sb, fetchLeaderboard } from "./db.js";
 import { settingsCard } from "./settings.js";
 import { exportToExcel } from "./export.js";
 import { appVersion } from "./offline.js";
+import { support, deviceState, deviceName, isIOS, prepareKey, turnOn, turnOff, sendTest } from "./push.js";
 
 let board = { status: "loading", rows: [] }; // loading | ready | missing | error
 let period = "all_time"; // or "this_month"
@@ -19,10 +20,13 @@ export function showProfile() {
     el("h2", { class: "screen-title", text: "Profile" }),
     accountSection(),
     el("section", { class: "set-section" }, el("h3", { text: "Points" }), pointsBox()),
+    el("section", { class: "set-section" }, el("h3", { text: "Notifications" }), el("div", { id: "push-box" })),
     settingsCard(),
     downloadSection(),
     el("p", { class: "app-version", id: "app-version", text: versionLine() }));
   loadBoard();
+  paintPush();
+  prepareKey();
   if (!version) appVersion().then((v) => {
     version = v;
     const line = document.getElementById("app-version");
@@ -113,6 +117,95 @@ function pointsBox() {
       })));
 }
 
+// ---------- notifications ----------
+
+let pushBusy = ""; // "on" or "off" while turning notifications on or off here
+
+// Back from the phone's settings (where blocked notifications are allowed), or renewed as the app
+// opened (push.js): show the new state.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) paintPush(); });
+window.addEventListener("pushchange", () => paintPush());
+
+const here = () => (isIOS() ? `this ${deviceName()}` : "this browser");
+const blockedHelp = () => isIOS()
+  ? "Blocked. To allow them: iPhone Settings → Notifications → Budget."
+  : "Blocked. Allow notifications for this site in the browser (the icon left of the address), then come back.";
+
+// This device's switch, then the test. On iPhone, only the Home Screen app can get notifications.
+async function paintPush() {
+  if (!document.getElementById("push-box")) return;
+  const can = support();
+  const now = can === "ready" && !pushBusy ? await deviceState() : null;
+  let line;
+  let toggle = null;
+  if (can === "home-screen") line = "On iPhone, notifications come to the Home Screen app. Open Budget from your Home Screen and turn them on there.";
+  else if (can === "unsupported") line = isIOS() ? "Notifications need iOS 16.4 or later." : "This browser can't show notifications.";
+  else {
+    const on = pushBusy ? pushBusy === "on" : now === "on";
+    line = pushBusy === "on" ? "Turning on…" : pushBusy === "off" ? "Turning off…"
+      : now === "on" ? `On. Notifications come to ${here()}.`
+      : now === "blocked" ? blockedHelp()
+      : `Off. Turn on to get notifications on ${here()}.`;
+    toggle = el("button", {
+      type: "button", class: "switch", role: "switch", "aria-checked": String(on), "aria-label": `Notifications on ${here()}`,
+      disabled: Boolean(pushBusy) || now === "blocked", onclick: () => flipPush(on),
+    });
+  }
+  document.getElementById("push-box")?.replaceChildren(
+    el("div", { class: "push-row" },
+      el("div", { class: "push-text" },
+        el("span", { class: "push-title", text: here().replace(/^t/, "T") }),
+        el("span", { class: "muted small", text: line })),
+      toggle),
+    testButton());
+}
+
+function flipPush(wasOn) {
+  if (!wasOn && !navigator.onLine) return toast("Turning notifications on needs a connection.");
+  const job = wasOn ? turnOff() : turnOn(); // turnOn asks for permission at once, while the tap still counts
+  pushBusy = wasOn ? "off" : "on";
+  paintPush();
+  job.then((result) => {
+    if (result === "blocked") toast("Notifications were blocked. They can be allowed again in settings.");
+  }).catch((e) => toast(friendlyError(e))).finally(() => {
+    pushBusy = "";
+    paintPush();
+  });
+}
+
+const devices = (n) => `${n} device${n === 1 ? "" : "s"}`;
+
+function testResult({ devices: total, sent, removed, failed = [] }) {
+  if (!total) return "None of your devices has notifications on yet. Turn them on above first.";
+  const parts = [];
+  if (sent) parts.push(`Sent to ${devices(sent)}. It should arrive in a few seconds.`);
+  if (removed) parts.push(`Removed ${devices(removed)} that no longer take${removed === 1 ? "s" : ""} notifications.`);
+  if (failed.length) parts.push(`Couldn't reach ${devices(failed.length)} (${failed[0].slice(0, 60)}).`);
+  if (!sent && removed && !failed.length) parts.push("Turn them on again above.");
+  return parts.join(" ");
+}
+
+// Sends to every device of yours that has notifications on, this one included.
+function testButton() {
+  const label = "Send a test to my devices";
+  const button = el("button", {
+    type: "button", class: "btn secondary full", text: label,
+    onclick: async () => {
+      if (!navigator.onLine) return toast("Sending a test needs a connection.");
+      button.disabled = true;
+      button.textContent = "Sending…";
+      try {
+        toast(testResult(await sendTest()));
+      } catch (e) {
+        toast(friendlyError(e));
+      }
+      button.disabled = false;
+      button.textContent = label;
+    },
+  });
+  return button;
+}
+
 // ---------- account ----------
 
 function accountSection() {
@@ -136,5 +229,12 @@ function accountSection() {
     el("h3", { text: "Account" }),
     el("p", { class: "acct" }, el("strong", { text: state.me.display_name }), el("span", { class: "muted", text: ` · ${state.me.email}` })),
     pwForm,
-    el("button", { type: "button", class: "btn secondary full", text: "Sign out", onclick: () => sb.auth.signOut() }));
+    el("button", {
+      type: "button", class: "btn secondary full", text: "Sign out",
+      onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        await turnOff(); // this device stops getting your notifications
+        sb.auth.signOut();
+      },
+    }));
 }

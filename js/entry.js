@@ -15,8 +15,8 @@ import {
   fetchFavorites, insertFavorite, updateFavorite, deleteFavorite, useFavorite,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
-import { monthStatus, monthOf, budgetMonth, openBudgetOn } from "./budget.js";
-import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, handledStatus, ordinal, shortDate } from "./recurring.js";
+import { monthStatus, monthOf, budgetMonth, openBudgetOn, compact } from "./budget.js";
+import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, handledStatus, scheduledFor, ordinal, shortDate } from "./recurring.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -148,23 +148,33 @@ async function loadBudgetTiles() {
   if (f.type === "expense") renderGrid();
 }
 
-// { used, text, over } for a category tile, or null when it has no budget this month.
+// { used, planned, text, over, willOver } for a category tile, or null when it has no budget this
+// month. used: the share spent; planned: the share scheduled but not logged yet (it fills on,
+// striped, after used). "Left" is what's free after both.
 function tileBudget(categoryId) {
   if (f.mode !== "add" || f.type !== "expense" || budgetTiles?.month !== monthOf(f.date)) return null;
   const budget = budgetTiles.budget.get(categoryId);
   if (!budget) return null;
   const spent = budgetTiles.spent.get(categoryId) || 0;
+  const sched = scheduledFor(budgetTiles.month).get(categoryId) || { egp: 0, usd: 0 };
   // Budgets are EGP. With the entry in USD, show the USD equivalent, marked ≈ as in History:
-  // what's left at the rate on screen; an overflow as that share of the category's saved USD
-  // spending, the same figure the Budget tab shows.
+  // what's left at the rate on screen; an overflow already spent as that share of the
+  // category's saved USD spending (the figure the Budget tab shows), one still to come as that
+  // share of the scheduled payments' USD value.
   const inUsd = f.currency === "USD" && f.rate > 0;
-  const egp = (n) => fmtMoney(n, "EGP", { decimals: 0 });
-  const usd = (n) => `≈ ${fmtMoney(n, "USD", { decimals: 0, code: true })}`;
+  const egp = (n) => `EGP ${compact(n)}`;
+  const usd = (n) => `≈ USD ${compact(n)}`;
   if (spent > budget) {
     const overUsd = ((spent - budget) / spent) * (budgetTiles.spentUsd.get(categoryId) || 0);
-    return { used: 100, over: true, text: `${inUsd ? usd(overUsd) : egp(spent - budget)} over` };
+    return { used: 100, planned: 0, over: true, text: `${inUsd ? usd(overUsd) : egp(spent - budget)} over` };
   }
-  return { used: (spent / budget) * 100, over: false, text: `${inUsd ? usd((budget - spent) / f.rate) : egp(budget - spent)} left` };
+  const used = (spent / budget) * 100;
+  const planned = Math.min(100 - used, (sched.egp / budget) * 100);
+  const by = spent + sched.egp - budget;
+  if (by > 0) {
+    return { used, planned, willOver: true, text: `${inUsd ? usd((by / sched.egp) * sched.usd) : egp(by)} over` };
+  }
+  return { used, planned, over: false, text: `${inUsd ? usd(-by / f.rate) : egp(-by)} left` };
 }
 
 export async function showEdit(id) {
@@ -514,11 +524,13 @@ function renderGrid() {
     const b = isIncome ? null : tileBudget(x.id);
     return el("button", {
       type: "button", "aria-pressed": String(x.id === selected), "data-id": x.id,
-      class: "cat-btn" + (x.id === selected ? " sel" : "") + (b ? " budgeted" : "") + (b?.over ? " over" : ""),
+      class: "cat-btn" + (x.id === selected ? " sel" : "") + (b ? " budgeted" : "") + (b?.over ? " over" : "") + (b?.willOver ? " will-over" : ""),
       style: b ? `--used:${b.used.toFixed(1)}%` : null,
       "aria-label": b ? `${x.name}, ${b.text} this month` : null,
       onclick: () => pick(x.id),
     },
+      // Scheduled but not logged yet: striped, right after the share spent.
+      b?.planned > 0 ? el("span", { class: "planned", "aria-hidden": "true", style: `left:${b.used.toFixed(1)}%;width:${b.planned.toFixed(1)}%` }) : null,
       el("span", { class: "ico", "aria-hidden": "true", text: x.icon }),
       el("span", { class: "nm", text: x.name }),
       b ? el("span", { class: "left", text: b.text }) : null);
@@ -1232,6 +1244,11 @@ async function runScan(file) {
 }
 
 // ---------- connectivity ----------
+
+// Scheduled payments (re)loaded: the budget fills on the category tiles include them.
+window.addEventListener("recurringchange", () => {
+  if (f?.mode === "add" && !screen().hidden) renderGrid();
+});
 
 window.addEventListener("online", () => {
   // Back online: a missing rate, or today's standing in for a past day's, can now be fetched.

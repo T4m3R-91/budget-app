@@ -152,6 +152,28 @@ function repeats(item) {
   return false;
 }
 
+// What's scheduled but not logged yet for each expense category in a month (due in it, overdue
+// ones included): Map(categoryId → { egp, usd }), a payment in the other currency at today's rate.
+// The budget bars and the Add tab's tiles show it after what's spent.
+export function scheduledFor(month) {
+  const out = new Map();
+  if (data.status !== "ready") return out;
+  for (const item of data.items) {
+    if (item.type !== "expense") continue;
+    const due = dueIn(item, month);
+    if (!due || data.handled.has(key(item.id, due))) continue;
+    const amount = Number(item.amount);
+    if (item.currency === "USD" && !data.rate) continue; // no rate to count it in EGP
+    const egp = item.currency === "USD" ? amount * data.rate : amount;
+    const usd = item.currency === "USD" ? amount : data.rate ? amount / data.rate : 0;
+    const s = out.get(item.category_id) || { egp: 0, usd: 0 };
+    s.egp += egp;
+    s.usd += usd;
+    out.set(item.category_id, s);
+  }
+  return out;
+}
+
 // Whether the item an entry was logged from repeats (true while the items aren't loaded yet).
 export function itemRepeats(itemId) {
   const item = data.items.find((i) => i.id === itemId);
@@ -445,10 +467,12 @@ async function logNow(item, due, button, on = isoLocal()) {
         try {
           await deleteTransaction(saved.id);
           toast(pts ? `Entry removed · −${pts} pts` : "Entry removed");
+          window.dispatchEvent(new Event("entrieschange")); // the budget bars follow
         } catch (e) { toast(friendlyError(e)); }
         refreshRecurring();
       },
     });
+    window.dispatchEvent(new Event("entrieschange")); // the budget bars follow
   } catch (e) {
     toast(e?.code === "23505" ? "That one's already logged." : friendlyError(e));
   }

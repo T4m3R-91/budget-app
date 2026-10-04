@@ -1,11 +1,12 @@
 // The app's offline copy (a service worker). It keeps the app's own files on the phone, so the app
-// opens instantly and without a connection, and keeps the libraries it loads from CDNs.
+// opens instantly and without a connection, and keeps the libraries it loads from CDNs. It also
+// shows the notifications the notify function sends (push.js turns them on).
 //
 // RELEASES: raise VERSION every time any app file changes, and upload this file with them. The
 // phone then fetches the new files in the background and the app offers "Reload". Profile shows
 // this version, so it always names the files actually running on the phone.
 
-const VERSION = "2.7.5";
+const VERSION = "2.9.0";
 const APP = `app-${VERSION}`;
 const LIBS = "libs"; // CDN libraries: their URLs name their version, so they're kept across releases
 
@@ -14,7 +15,7 @@ const FILES = [
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
   "js/app.js", "js/budget.js", "js/dashboard.js", "js/db.js", "js/entry.js", "js/export.js",
   "js/filters.js", "js/fx.js", "js/history.js", "js/numbers.js", "js/offline.js", "js/outbox.js",
-  "js/profile.js", "js/receipt-parse.js", "js/receipt.js", "js/recurring.js", "js/settings.js",
+  "js/profile.js", "js/push.js", "js/receipt-parse.js", "js/receipt.js", "js/recurring.js", "js/settings.js",
   "js/state.js", "js/store.js", "js/ui.js",
 ];
 const LIB_HOSTS = ["cdn.jsdelivr.net", "cdn.sheetjs.com"];
@@ -79,3 +80,31 @@ async function keepLibs(urls) {
     } catch { /* offline: next time */ }
   }
 }
+
+// ---------- notifications ----------
+
+// A message from the notify function: { title, body, url, tag }. Each one must show a notification:
+// browsers stop delivering to apps that receive them silently.
+self.addEventListener("push", (event) => {
+  let msg;
+  try { msg = event.data?.json() || {}; } catch { msg = { body: event.data?.text() }; }
+  event.waitUntil(self.registration.showNotification(msg.title || "Household Budget", {
+    body: msg.body || "",
+    icon: "icons/icon-192.png",
+    tag: msg.tag || "",
+    data: { url: msg.url || "./" },
+  }));
+});
+
+// Tapping one opens the app on the screen it's about: the open app is told where to go (a new
+// address would restart it), or the app opens there.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "./", self.registration.scope).href;
+  event.waitUntil((async () => {
+    const [win] = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (!win) return self.clients.openWindow(url);
+    win.postMessage({ type: "open", url });
+    return win.focus();
+  })());
+});
