@@ -271,13 +271,20 @@ export async function markInboxRead() {
   unwrap(await sb.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null));
 }
 
-// Right after you save something new: the notify function tells the rest of the household.
-// kind: "entry", "repeat" (an entry set to repeat), "log" (a scheduled payment logged) with the
-// entry's id, or "scheduled" with the scheduled payment's id. Nothing waits for it, and nothing
-// is said if it fails (offline, or the function isn't updated yet).
-export function notifyActivity(kind, id) {
-  sb.functions.invoke("notify", { body: { action: "activity", kind, id } }).catch(() => {});
+// Right after you save something: the notify function tells the rest of the household. New:
+// "entry", "repeat" (an entry set to repeat), "log" (a scheduled payment logged) with the entry's
+// id, "scheduled" with the scheduled payment's id. Changes, with what it was before (extra):
+// "edit" ({ before }), "edit_scheduled" ({ before, from }), "skip" / "unskip" ({ due }), "budget"
+// (id: the month; { before: [{ category_id, amount_egp }] }). Deletes aren't announced. Nothing
+// waits for it, and nothing is said if it fails (offline, or the function isn't updated yet).
+export function notifyActivity(kind, id, extra = {}) {
+  sb.functions.invoke("notify", { body: { action: "activity", kind, id, ...extra } }).catch(() => {});
 }
+
+// What an entry or scheduled payment was before an edit, for the others' "EGP 450 → EGP 520".
+const BEFORE = ["type", "amount", "currency", "category_id", "subcategory_id", "income_source_id", "payment_method_id",
+  "receiving_method_id", "occurred_on", "description", "who", "frequency", "day", "month", "starts_on", "ended_on"];
+export const beforeOf = (row) => Object.fromEntries(BEFORE.filter((k) => k in row).map((k) => [k, row[k]]));
 
 // Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed,
 // reminder } (reminder: how many were due, when the test was today's reminder).

@@ -180,6 +180,11 @@ a.btn { display: inline-block; text-decoration: none; }
   border-radius: 9px; background: var(--expense); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
 }
 
+/* What a tapped notification was about (an entry in History, a scheduled payment on the Budget
+   tab): outlined for a moment, then back to normal. */
+@keyframes spotlight { 0%, 55% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.spotlight { animation: spotlight 2.4s ease-out; border-radius: var(--radius); }
+
 /* The notification center: History's cards (.hist-date, .txn-row: shape, icon tile, red for
    payments and green for income, .list-foot), each with its notification's whole text (a reminder
    has a line per payment) and its time at the right; a new one has a dot before its time. */

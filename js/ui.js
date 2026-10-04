@@ -62,6 +62,16 @@ export function relativeDay(iso) {
 
 // ---------- feedback ----------
 
+// Draws the eye to something a notification was about: scrolls it into view and outlines it for
+// a moment (see .spotlight in styles.css).
+export function spotlight(node) {
+  node.scrollIntoView({ block: "center", behavior: "smooth" });
+  node.classList.remove("spotlight");
+  void node.offsetWidth; // restart the animation if it's already showing
+  node.classList.add("spotlight");
+  node.addEventListener("animationend", () => node.classList.remove("spotlight"), { once: true });
+}
+
 let toastTimer;
 export function toast(message, action) {
   const t = document.getElementById("toast");

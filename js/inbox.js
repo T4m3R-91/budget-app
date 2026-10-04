@@ -112,7 +112,10 @@ function isIncome(n) {
 }
 
 // The text with its amounts as History shows them: red with − for a payment, green with + for income.
-function bodyText(body) {
+// A budget's amounts are budgets, not payments: shown as they are.
+const aboutBudget = (n) => /'s budget$/.test(n.title);
+function bodyText(body, signed = true) {
+  if (!signed) return el("span", { class: "txn-sub inbox-body", text: body });
   const parts = [];
   let at = 0;
   for (const m of body.matchAll(AMOUNT)) {
@@ -132,7 +135,7 @@ function card(n) {
     el("span", { class: "txn-ico", "aria-hidden": "true", text: n.kind === "reminder" ? "⏰" : "👤" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: n.title }),
-      n.body ? bodyText(n.body) : null),
+      n.body ? bodyText(n.body, !aboutBudget(n)) : null),
     el("span", { class: "inbox-when" },
       fresh.has(n.id) || !n.read_at ? el("span", { class: "inbox-dot", "aria-label": "New" }) : null,
       time(n.created_at)));

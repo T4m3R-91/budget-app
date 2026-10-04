@@ -11,7 +11,7 @@ import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
-  insertRecurring, deleteRecurring, linkToRecurring, notifyActivity,
+  insertRecurring, deleteRecurring, linkToRecurring, notifyActivity, beforeOf,
   fetchFavorites, insertFavorite, updateFavorite, deleteFavorite, useFavorite,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
@@ -841,6 +841,7 @@ async function save_() {
   try {
     if (form.mode === "edit") {
       await updateTransaction(form.id, row);
+      notifyActivity("edit", form.id, { before: beforeOf(form.original) }); // the others see what changed
       f = null;
       toast("Changes saved");
       location.hash = "#history";
@@ -849,7 +850,8 @@ async function save_() {
     if (form.mode === "recur") {
       // The edited version takes over from the On date (or the first month after any already
       // logged or skipped); earlier months keep the details they had.
-      const { from, note } = await saveItemEdit(form.item, itemFields(), form.date);
+      const { from, note, id } = await saveItemEdit(form.item, itemFields(), form.date);
+      notifyActivity("edit_scheduled", id, { from, before: beforeOf(form.item) });
       f = null;
       toast(`${recurringLabel({ ...form.item, ...itemFields() })} updated from ${shortDate(from)} on${note}`);
       openBudgetOn(form.backTo);

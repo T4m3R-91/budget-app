@@ -3,10 +3,10 @@
 // Entries saved offline show on top, under "Waiting to sync", until they reach the server.
 
 import { state, byId, memberName } from "./state.js";
-import { el, fmtMoney, friendlyDate, friendlyError, toast, parseISODate } from "./ui.js";
+import { el, fmtMoney, friendlyDate, friendlyError, toast, parseISODate, spotlight } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
 import { itemRepeats } from "./recurring.js";
-import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
+import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange, clearFilters } from "./filters.js";
 import { pendingEntries, removePending } from "./outbox.js";
 
 const PAGE = 50;
@@ -31,7 +31,11 @@ onFiltersChange(() => {
 // Something was queued, synced or removed: reload, so synced entries move into the list.
 window.addEventListener("outboxchange", () => { if (onScreen()) showHistory(); });
 
-export async function showHistory() {
+// focus: an entry's id, from a notification about it: the list opens on it, highlighted. It's kept
+// until a load finishes: opening the app syncs entries saved offline, which reloads the list too.
+let focusPending = null;
+export async function showHistory(focus = null) {
+  if (focus) focusPending = focus;
   const gen = ++generation;
   shown = PAGE;
   error = null;
@@ -49,6 +53,30 @@ export async function showHistory() {
     pending = await pendingEntries();
   }
   renderList();
+  if (focusPending && rows) {
+    const id = focusPending;
+    focusPending = null;
+    focusOn(id);
+  }
+}
+
+// Scrolls to an entry and highlights it: All instead of Expenses or Income, and no filters, if
+// those would hide it; further down the list than shown so far, if it's older.
+function focusOn(id) {
+  if (!rows.some((t) => t.id === id)) return toast("This entry was deleted.");
+  if (!matching().some((t) => t.id === id)) {
+    type = "all";
+    clearFilters();
+    render();
+    toast("Filters cleared to show it.");
+  }
+  const at = matching().findIndex((t) => t.id === id);
+  if (at >= shown) {
+    shown = Math.ceil((at + 1) / PAGE) * PAGE;
+    renderList();
+  }
+  const row = document.querySelector(`#h-list .txn-row[data-id="${CSS.escape(id)}"]`);
+  if (row) spotlight(row);
 }
 
 function render() {
@@ -151,7 +179,7 @@ function row(t) {
   // are shortened instead when the line is too long.
   // (No ↻ for a payment scheduled just once.)
   const due = t.recurring_due_on ? `${detail ? "· " : ""}${itemRepeats(t.recurring_id) ? "↻ " : ""}Due ${plainDate(t.recurring_due_on)}` : null;
-  return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}` },
+  return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}`, "data-id": t.id },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: kind?.name || "Unknown" }),

@@ -89,7 +89,9 @@ function trashIcon() {
   return svg;
 }
 
-function clearFilters() {
+// Clears every filter (the bar's Clear button; also History when it opens on an entry they'd hide).
+export function clearFilters() {
+  if (!bar) return;
   filters.search = "";
   filters.categories.clear();
   filters.who.clear();
