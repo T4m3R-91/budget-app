@@ -15,6 +15,7 @@ import { showDashboard, CHART_JS } from "./dashboard.js";
 import { FLATPICKR_JS, FLATPICKR_CSS } from "./filters.js";
 import { showProfile } from "./profile.js";
 import { showBudget, showBudgetEditor } from "./budget.js";
+import { refreshDevice } from "./push.js";
 
 window.__appStarted = true;
 
@@ -239,6 +240,7 @@ async function enterApp(session) {
   route();
   refreshRecurring(); // the Budget tab's badge: recurring items due today or overdue
   syncOutbox(); // anything saved offline last time
+  refreshDevice(); // notifications on this device, if turned on (push.js)
   setTimeout(prepareReceiptReader, 5000); // once, while online: so receipts can be scanned offline
 }
 
@@ -297,6 +299,9 @@ function startOfflineCopy() {
   const sw = navigator.serviceWorker;
   const hadController = Boolean(sw.controller);
   sw.addEventListener("controllerchange", () => { if (hadController) location.reload(); }); // after Reload
+  sw.addEventListener("message", (event) => { // a notification was tapped: go to what it's about
+    if (event.data?.type === "open") location.hash = new URL(event.data.url).hash || "#add";
+  });
   sw.register("sw.js").then((reg) => {
     const offer = (worker) => {
       $("update-banner").replaceChildren("A new version is ready. ",

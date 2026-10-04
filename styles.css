@@ -254,6 +254,20 @@ a.btn { display: inline-block; text-decoration: none; }
     var(--panel) var(--used));
 }
 .cat-btn.budgeted.over { background: color-mix(in srgb, var(--expense) 22%, var(--panel)); }
+/* Scheduled payments not logged yet: pale blue stripes from where the spent fill ends (orange when
+   they'd take the category over), behind the icon and name. */
+.cat-btn.budgeted { position: relative; }
+.cat-btn.budgeted > :not(.planned) { position: relative; z-index: 1; }
+.cat-btn .planned {
+  position: absolute; top: 0; bottom: 0; z-index: 0;
+  background: repeating-linear-gradient(-45deg,
+    color-mix(in srgb, var(--accent) 17%, transparent) 0 4px, color-mix(in srgb, var(--accent) 5%, transparent) 4px 8px);
+}
+.cat-btn.will-over .planned {
+  background: repeating-linear-gradient(-45deg,
+    color-mix(in srgb, var(--warn) 24%, transparent) 0 4px, color-mix(in srgb, var(--warn) 7%, transparent) 4px 8px);
+}
+.cat-btn.will-over .left { color: var(--warn); font-weight: 600; }
 .cat-btn.budgeted .ico { font-size: 17px; }
 .cat-btn.budgeted .nm { -webkit-line-clamp: 1; max-width: 100%; }
 .cat-btn .left { font-size: 10.5px; line-height: 1.1; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -527,6 +541,20 @@ a.btn { display: inline-block; text-decoration: none; }
 .bud-bar .fill { background: var(--accent); }
 .bud-bar .ahead { background: var(--expense); border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .bud-bar.over .fill { background: var(--expense); }
+/* Scheduled payments not logged yet: pale blue stripes after everything spent (orange when they'd
+   take it over budget). What they follow loses its round end so the two meet flush. */
+.bud-bar .planned {
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
+  background: repeating-linear-gradient(-45deg,
+    color-mix(in srgb, var(--accent) 60%, transparent) 0 3px, color-mix(in srgb, var(--accent) 22%, transparent) 3px 6px);
+}
+.bud-bar.will-over .planned {
+  background: repeating-linear-gradient(-45deg,
+    color-mix(in srgb, var(--warn) 75%, transparent) 0 3px, color-mix(in srgb, var(--warn) 30%, transparent) 3px 6px);
+}
+.bud-bar.has-planned .fill, .bud-bar.has-planned .ahead { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.bud-fig .planned-fig { color: color-mix(in srgb, var(--accent) 75%, var(--muted)); font-weight: 600; }
+.bud-row.will-over .planned-fig, .bud-fig .will-over { color: var(--warn); font-weight: 600; }
 .bud-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 /* Name left, figures right; on a narrow phone long figures drop under the name instead of cutting it. */
 .bud-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; margin-bottom: 4px; font-size: 13.5px; }
@@ -661,6 +689,21 @@ a.btn { display: inline-block; text-decoration: none; }
 .lb-star { font-size: 16px; text-align: center; }
 .lb-pts { color: var(--muted); font-variant-numeric: tabular-nums; }
 .lb-row.leader .lb-name, .lb-row.leader .lb-pts { color: var(--text); font-weight: 600; }
+/* Notifications (Profile): this device's on/off switch, then the test button. */
+.push-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.push-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.push-title { font-weight: 600; }
+.switch {
+  position: relative; flex: 0 0 auto; width: 51px; height: 31px; padding: 0;
+  border: 0; border-radius: 16px; background: var(--faint); transition: background 0.2s;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0004; transition: transform 0.2s;
+}
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(20px); }
+.switch:disabled { opacity: 0.5; }
 .stack { display: grid; gap: 10px; }
 .app-version { text-align: center; color: var(--faint); font-size: 12px; }
 

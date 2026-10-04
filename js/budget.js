@@ -8,13 +8,24 @@ import { state, byId } from "./state.js";
 import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate } from "./ui.js";
 import { parseAmount } from "./numbers.js";
 import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate } from "./db.js";
-import { paintRecurring, refreshRecurring, furthestDueMonth } from "./recurring.js";
+import { paintRecurring, refreshRecurring, furthestDueMonth, scheduledFor } from "./recurring.js";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const NOT_SET_UP = "Budgets aren't set up yet. Run budgets-migration.sql in Supabase to turn them on.";
 
 // Months are their 1st day: "2026-10-01".
 export const monthOf = (iso) => `${iso.slice(0, 7)}-01`;
+
+// Short amounts for the budget bars and tiles: 950, 10.62K, 16K, 1.25M (two decimals at most).
+export function compact(n) {
+  const two = (x) => Math.round(x * 100) / 100;
+  const v = Math.abs(n);
+  const sign = n < 0 ? "−" : "";
+  const fmt = (x) => x.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (two(v / 1e6) >= 1) return `${sign}${fmt(two(v / 1e6))}M`;
+  if (two(v / 1e3) >= 1) return `${sign}${fmt(two(v / 1e3))}K`;
+  return `${sign}${Math.round(v).toLocaleString("en-US")}`;
+}
 export function shiftMonth(month, by) {
   const d = parseISODate(month);
   d.setMonth(d.getMonth() + by);
@@ -25,8 +36,6 @@ const monthShort = (month) => `${monthName(month).slice(0, 3)} ${month.slice(0, 
 
 const egp = (n) => fmtMoney(n, "EGP", { decimals: 0 });
 const plain = (n) => Math.round(n).toLocaleString("en-US");
-// Rounded down, so 99.6% of a budget reads 99%: "100%" only once it's actually reached.
-const pct = (part, whole) => `${Math.floor((part / whole) * 100)}%`;
 const toMap = (rows) => new Map(rows.map((r) => [r.category_id, Number(r.amount_egp)]));
 function spentBy(rows) {
   const out = new Map();
@@ -61,9 +70,19 @@ export async function monthStatus(month) {
 const card = { month: null, next: null, earliest: null, data: new Map() };
 let built = false;
 
-// Recurring items (re)loaded: how far ahead the month switcher goes may have changed.
+// Recurring items (re)loaded: how far ahead the month switcher goes, and what's scheduled on the
+// bars, may have changed.
 window.addEventListener("recurringchange", () => {
   if (document.getElementById("screen-budget")?.hidden === false) paintCard();
+});
+// A payment was logged (or that undone) from the Scheduled card: the spending on the bars is out of
+// date. This month is fetched again (its bars stay up meanwhile); other months, when next shown.
+window.addEventListener("entrieschange", () => {
+  if (document.getElementById("screen-budget")?.hidden !== false) return;
+  const shown = card.data.get(card.month);
+  card.data.clear();
+  if (shown) card.data.set(card.month, shown);
+  loadCardMonth({ refresh: true });
 });
 
 // The month the tab is showing (null before it's first opened), and opening it on a given month
@@ -109,11 +128,15 @@ async function loadEarliest() {
   paintCard();
 }
 
-async function loadCardMonth() {
+// refresh: fetch again even if the month is loaded (keeping its figures on screen meanwhile).
+async function loadCardMonth({ refresh = false } = {}) {
   const month = card.month;
-  if (!card.data.has(month)) {
-    card.data.set(month, { status: "loading" });
-    paintCard();
+  const kept = card.data.get(month);
+  if (refresh || !kept) {
+    if (kept?.status !== "ready") {
+      card.data.set(month, { status: "loading" });
+      paintCard();
+    }
     try {
       const [rows, spend] = await Promise.all([fetchBudget(month), fetchExpensesBetween(month, shiftMonth(month, 1))]);
       const spent = new Map();
@@ -125,7 +148,7 @@ async function loadCardMonth() {
       }
       card.data.set(month, { status: "ready", budget: toMap(rows), spent });
     } catch (e) {
-      card.data.set(month, { status: isMissing(e) ? "missing" : "error" });
+      if (kept?.status !== "ready") card.data.set(month, { status: isMissing(e) ? "missing" : "error" }); // a failed refresh keeps what's shown
     }
   }
   if (month === card.month) paintCard();
@@ -170,42 +193,61 @@ function cardBody(month, now, data) {
   }
 
   const none = { egp: 0, usd: 0 };
+  const scheduled = scheduledFor(month); // due this month, not logged yet
   const lines = [...budget]
     .map(([id, amount]) => {
       const cat = byId(state.categories, id);
-      return { label: `${cat?.icon || "📦"} ${cat?.name || "Unknown"}`, budget: amount, spent: spent.get(id) || none };
+      return { label: `${cat?.icon || "📦"} ${cat?.name || "Unknown"}`, budget: amount, spent: spent.get(id) || none, planned: scheduled.get(id) || none };
     })
-    .sort((a, b) => b.spent.egp / b.budget - a.spent.egp / a.budget); // over budget first, then the most used
-  const sum = (list, key) => list.reduce((s, l) => s + l.spent[key], 0);
+    // Over budget first (or about to be, with what's scheduled), then the most used.
+    .sort((a, b) => (b.spent.egp + b.planned.egp) / b.budget - (a.spent.egp + a.planned.egp) / a.budget);
+  const sum = (list, field, key) => list.reduce((s, l) => s + l[field][key], 0);
   const total = lines.reduce((s, l) => s + l.budget, 0);
-  const used = { egp: sum(lines, "egp"), usd: sum(lines, "usd") };
+  const used = { egp: sum(lines, "spent", "egp"), usd: sum(lines, "spent", "usd") };
+  const planned = { egp: sum(lines, "planned", "egp"), usd: sum(lines, "planned", "usd") };
   const unbudgeted = [...spent].filter(([id]) => !budget.has(id)).map(([, s]) => s);
   const inUsd = state.displayCurrency === "USD";
   // USD equivalents are marked ≈, as in History.
   const usd = (n) => `≈ ${fmtMoney(n, "USD", { decimals: 0, code: true })}`;
 
-  // One format for the overall line and every category.
-  // EGP: "EGP 10,620 / 15,000 · 70%", or "EGP 156,988 / 100,000 · EGP 56,988 over".
-  // USD: the limits are EGP, so only "70%", or the overflow in USD: "≈ USD 1,120 over". The
-  // overflow is that share of the spending's saved USD value, so it doesn't drift with the rate.
-  const figures = (sp, bu) => {
+  // One short format (K / M) for the overall line and every category.
+  // EGP: "EGP 10.62K / 15K"; what's scheduled but not logged yet shows as "+12K" in the striped
+  // segment's color: "EGP 3K +12K / 16K". Over: "· 1K over", red when the spending is over,
+  // orange when the scheduled payments would take it over.
+  // USD: the limits are EGP, so only an overflow, in USD ("≈ USD 20 over"); nothing within budget.
+  // An overflow already spent is that share of the spending's saved USD value (it doesn't drift
+  // with the rate); one still to come, that share of the scheduled payments' USD value.
+  const figures = (sp, pl, bu) => {
     const over = sp.egp > bu;
-    if (inUsd) return over ? `${usd(((sp.egp - bu) / sp.egp) * sp.usd)} over` : pct(sp.egp, bu);
-    return `${egp(sp.egp)} / ${plain(bu)} · ${over ? `${egp(sp.egp - bu)} over` : pct(sp.egp, bu)}`;
+    const willOver = !over && sp.egp + pl.egp > bu;
+    const by = over ? sp.egp - bu : sp.egp + pl.egp - bu;
+    const overText = (text) => el("span", { class: willOver ? "will-over" : "is-over", text });
+    if (inUsd) {
+      if (!over && !willOver) return [];
+      return [overText(`≈ USD ${compact(over ? (by / sp.egp) * sp.usd : (by / pl.egp) * pl.usd)} over`)];
+    }
+    return [
+      `EGP ${compact(sp.egp)}`,
+      pl.egp > 0 ? el("span", { class: "planned-fig", text: ` +${compact(pl.egp)}` }) : null,
+      ` / ${compact(bu)}`,
+      over || willOver ? [" · ", overText(`${compact(by)} over`)] : null,
+    ];
   };
   // This month only: how far through the month today is, marked on every bar (an even pace).
   const pace = month === now ? paceToday() : null;
-  const row = (label, sp, bu, size) =>
-    el("li", { class: `bud-row${size ? ` bud-${size}` : ""}${sp.egp > bu ? " over" : ""}` },
+  const row = (label, sp, pl, bu, size) => {
+    const status = sp.egp > bu ? " over" : sp.egp + pl.egp > bu ? " will-over" : "";
+    return el("li", { class: `bud-row${size ? ` bud-${size}` : ""}${status}` },
       el("div", { class: "bud-line" },
         el("span", { class: "bud-name", text: label }),
-        el("span", { class: "bud-fig", text: figures(sp, bu) })),
-      bar(sp.egp, bu, size, pace));
+        el("span", { class: "bud-fig" }, figures(sp, pl, bu))),
+      bar(sp.egp, bu, size, pace, pl.egp));
+  };
 
   return [
     el("ul", { class: "bud-list" },
-      row("Overall", used, total, "overall"),
-      lines.map((l) => row(l.label, l.spent, l.budget))),
+      row("Overall", used, planned, total, "overall"),
+      lines.map((l) => row(l.label, l.spent, l.planned, l.budget))),
     unbudgeted.length
       ? el("p", { class: "bud-none" }, el("span", { text: "Without a budget" }),
           el("span", { text: inUsd ? usd(unbudgeted.reduce((s, v) => s + v.usd, 0)) : egp(unbudgeted.reduce((s, v) => s + v.egp, 0)) }))
@@ -216,15 +258,20 @@ function cardBody(month, now, data) {
 
 // Blue up to the budget; full and red once over. pace (0–1) adds a gray fill underneath, up to an
 // even pace for today: gray showing past the blue is what an even pace would still allow by today.
-// Spending beyond that pace (but still within budget) shows in the over-budget red.
-function bar(spent, budget, size = "", pace = null) {
+// Spending beyond that pace (but still within budget) shows in the over-budget red. Scheduled
+// payments not logged yet come last, striped, right after all of that (orange stripes when they'd
+// take it over budget); the pace only ever counts what's actually spent.
+function bar(spent, budget, size = "", pace = null, planned = 0) {
   const used = Math.min(100, (spent / budget) * 100);
+  const later = Math.min(100 - used, (planned / budget) * 100);
   const at = pace == null ? null : pace * 100;
   const ahead = at != null && spent <= budget && used > at;
-  return el("div", { class: `bud-bar ${size}${spent > budget ? " over" : ""}`, "aria-hidden": "true" },
+  const willOver = spent <= budget && spent + planned > budget;
+  return el("div", { class: `bud-bar ${size}${spent > budget ? " over" : ""}${willOver ? " will-over" : ""}${later > 0 ? " has-planned" : ""}`, "aria-hidden": "true" },
     at == null ? null : el("span", { class: "pace", style: `width:${at.toFixed(1)}%` }),
     el("span", { class: "fill", style: `width:${used}%` }),
-    ahead ? el("span", { class: "ahead", style: `left:${at.toFixed(1)}%;width:${(used - at).toFixed(1)}%` }) : null);
+    ahead ? el("span", { class: "ahead", style: `left:${at.toFixed(1)}%;width:${(used - at).toFixed(1)}%` }) : null,
+    later > 0 ? el("span", { class: "planned", style: `left:${used}%;width:${later}%` }) : null);
 }
 
 // Share of this month gone by the end of today: the 15th of a 30-day month is 0.5.

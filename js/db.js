@@ -215,6 +215,31 @@ export async function useFavorite(id) {
   unwrap(await sb.rpc("use_favorite", { p_id: id }));
 }
 
+// ---------- notifications (see notifications-migration.sql and supabase/functions/notify) ----------
+
+// This device, for the person signed in: { endpoint, p256dh, auth, device }.
+export async function savePushDevice({ endpoint, p256dh, auth, device }) {
+  unwrap(await sb.rpc("save_push_device", { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth, p_device: device }));
+}
+
+export async function forgetPushDevice(endpoint) {
+  unwrap(await sb.from("push_subscriptions").delete().eq("endpoint", endpoint));
+}
+
+// Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed }.
+// Its own error message ("The push keys aren't set…") is passed on.
+export async function callNotify(action) {
+  const { data, error } = await sb.functions.invoke("notify", { body: { action } });
+  if (!error) return data;
+  const status = error.context?.status; // context: the reply, or the network error when there was none
+  const said = await error.context?.json?.().then((b) => b?.error || b?.message || b?.msg).catch(() => null);
+  const e = new Error(status === 404
+    ? "The notify function isn't set up in Supabase yet."
+    : said || error.context?.message || error.message);
+  e.status = status;
+  throw e;
+}
+
 // ---------- the household's lists ----------
 
 export async function insertListItem(table, row) {
