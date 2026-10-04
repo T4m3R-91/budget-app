@@ -1,9 +1,10 @@
 // Profile: your account (password, sign-out), your points and the household leaderboard,
-// notifications on this device, the Settings card (collapsed until opened), and the Excel download.
+// notifications on this device, the Settings card (collapsed until opened), and the Excel download
+// with when the last automatic backup ran.
 
 import { state } from "./state.js";
-import { el, toast, friendlyError } from "./ui.js";
-import { sb, fetchLeaderboard, fetchNotifySettings, saveNotifySettings } from "./db.js";
+import { el, toast, friendlyError, friendlyDate, isoLocal } from "./ui.js";
+import { sb, fetchLeaderboard, fetchNotifySettings, saveNotifySettings, fetchBackupStatus } from "./db.js";
 import { settingsCard } from "./settings.js";
 import { exportToExcel } from "./export.js";
 import { appVersion } from "./offline.js";
@@ -53,10 +54,36 @@ function downloadSection() {
       button.textContent = "Download Excel";
     },
   });
-  return el("section", { class: "set-section" },
+  const section = el("section", { class: "set-section" },
     el("h3", { text: "Download" }),
     el("p", { class: "note", text: "Downloads everything as an Excel file with Transactions and Income tabs, in the same layout as your spreadsheet." }),
-    button);
+    button,
+    el("p", { id: "backup-line", class: "muted small backup-line", hidden: true }));
+  paintBackupLine();
+  return section;
+}
+
+// The nightly automatic backup (backup-repo/): when it last ran. Nothing shown until
+// backups-migration.sql has run; a warning when it's more than a day and a half old.
+async function paintBackupLine() {
+  let status;
+  try { status = await fetchBackupStatus(); } catch { return; }
+  const line = document.getElementById("backup-line");
+  if (!line || status === "missing") return;
+  line.hidden = false;
+  if (!status) {
+    line.textContent = "Automatic backups: waiting for the first one.";
+    return;
+  }
+  const at = new Date(status.last_backup_at);
+  const day = isoLocal(at);
+  const when = friendlyDate(day).replace(/^Today$/, "today").replace(/^Yesterday$/, "yesterday");
+  const time = at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const stale = Date.now() - at.getTime() > 36 * 3600 * 1000;
+  line.classList.toggle("stale", stale);
+  line.textContent = stale
+    ? `⚠ Last automatic backup: ${when}, ${time}. Check the backup repository on GitHub.`
+    : `Last automatic backup: ${when} ${time} ✓`;
 }
 
 // ---------- points ----------

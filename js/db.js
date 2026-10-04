@@ -90,6 +90,17 @@ export function latestEntryRate() {
   ));
 }
 
+// When the nightly backup last ran (backups-migration.sql; backup-repo/ is the job):
+// { last_backup_at, table_count, row_count, changed }, null before its first run, "missing"
+// until the migration has run.
+export function fetchBackupStatus() {
+  return cached("backup-status", async () => {
+    const { data, error } = await sb.from("backup_status").select("last_backup_at, table_count, row_count, changed").maybeSingle();
+    if (isMissingTable(error)) return "missing";
+    return unwrap({ data, error });
+  });
+}
+
 // [{ email, display_name, all_time, this_month }], one row per household member.
 export function fetchLeaderboard() {
   return cached("leaderboard", async () => unwrap(await sb.from("points_leaderboard").select("*")));
