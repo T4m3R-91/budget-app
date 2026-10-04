@@ -33,7 +33,7 @@ export async function reloadLists() {
   const lists = await cached("lists", async () => {
     const [receiving, ...results] = await Promise.all([
       sb.from("receiving_methods").select("*").order("sort_order").order("name"),
-      sb.from("members").select("email, display_name").order("display_name"),
+      sb.from("members").select("*").order("display_name"), // with role and status, once household-migration.sql has run
       sb.from("categories").select("*").order("sort_order").order("name"),
       sb.from("subcategories").select("*").order("sort_order").order("name"),
       sb.from("payment_methods").select("*").order("sort_order").order("name"),
@@ -282,8 +282,8 @@ export function notifyActivity(kind, id) {
 // Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed,
 // reminder } (reminder: how many were due, when the test was today's reminder).
 // Its own error message ("The push keys aren't set…") is passed on.
-export async function callNotify(action) {
-  const { data, error } = await sb.functions.invoke("notify", { body: { action } });
+export async function callNotify(action, extra = {}) {
+  const { data, error } = await sb.functions.invoke("notify", { body: { action, ...extra } });
   if (!error) return data;
   const status = error.context?.status; // context: the reply, or the network error when there was none
   const said = await error.context?.json?.().then((b) => b?.error || b?.message || b?.msg).catch(() => null);
@@ -292,6 +292,31 @@ export async function callNotify(action) {
     : said || error.context?.message || error.message);
   e.status = status;
   throw e;
+}
+
+// ---------- the household (household-migration.sql) ----------
+// Owners invite (and cancel invites) through the notify function, which uses Supabase's accounts;
+// the rest are database functions that check who's asking.
+
+const household = async (fn, args) => {
+  const { error } = await sb.rpc(fn, args);
+  if (error?.code === "PGRST202") throw new Error("This isn't set up yet. Run household-migration.sql in Supabase.");
+  if (error) throw error;
+};
+
+// { invited, emailed }: emailed false when they already had an account (they just sign in).
+export const inviteMember = (email, name) => callNotify("invite", { email, name, redirectTo: location.origin + location.pathname });
+export const cancelInvite = (email) => callNotify("cancel_invite", { email });
+export const setMemberRole = (email, role) => household("set_member_role", { p_email: email, p_role: role });
+export const setMemberActive = (email, active) => household("set_member_active", { p_email: email, p_active: active });
+export const renameMe = (name) => household("rename_me", { p_name: name });
+// Notes your first sign-in, so you no longer show as "Invited".
+export const markJoined = () => sb.rpc("mark_joined").then(() => {}, () => {});
+
+// For someone signed in who can't see the household: "deactivated", "none", or "active".
+export async function myMembership() {
+  const { data, error } = await sb.rpc("my_membership");
+  return error ? "none" : data;
 }
 
 // ---------- the household's lists ----------

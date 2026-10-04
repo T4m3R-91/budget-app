@@ -4,7 +4,7 @@
 // recurring item itself (#recurring/…), and adds or edits a favorite (#fav/…). The ↻ strip on the
 // On tile makes a new entry repeat; the row of favorites above the amount fills the form in a tap.
 
-import { state, byId, subcategoriesOf } from "./state.js";
+import { state, byId, subcategoriesOf, isActive } from "./state.js";
 import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
 import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
@@ -608,8 +608,10 @@ const fixedTile = (label, value) =>
 // With (or In): By and On show what it'll be (you, today) but can't be changed.
 function renderMeta() {
   const income = f.type === "income";
-  const people = state.members.map((m) => ({
-    value: m.email, label: m.email === state.me.email ? `${m.display_name} (you)` : m.display_name,
+  // Who's in the household now; editing an entry of someone deactivated keeps them as it is.
+  const people = state.members.filter((m) => isActive(m) || m.email === f.who).map((m) => ({
+    value: m.email,
+    label: m.email === state.me.email ? `${m.display_name} (you)` : isActive(m) ? m.display_name : `${m.display_name} (former)`,
   }));
   const tiles = f.mode === "fav" ? [fixedTile("By", `${state.me.display_name} (you)`), fixedTile("On", "Today")] : [
     metaTile("By", people.find((p) => p.value === f.who)?.label ?? "—",

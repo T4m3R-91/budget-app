@@ -33,3 +33,4 @@ export const idbGet = (store, key) => run(store, "readonly", (s) => s.get(key));
 export const idbAll = (store) => run(store, "readonly", (s) => s.getAll());
 export const idbPut = (store, value) => run(store, "readwrite", (s) => s.put(value));
 export const idbDelete = (store, key) => run(store, "readwrite", (s) => s.delete(key));
+export const idbClear = (store) => run(store, "readwrite", (s) => s.clear());
