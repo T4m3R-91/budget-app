@@ -2,7 +2,7 @@
 // History: a single set of settings and a single bar, moved into whichever of the two is on
 // screen, so a change made in either shows in both. Both apply it through matchesFilters().
 
-import { state, byId } from "./state.js";
+import { state, byId, isActive } from "./state.js";
 import { el, friendlyError, loadScript, loadStyle, toast, isoLocal, parseISODate } from "./ui.js";
 
 export const FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js";
@@ -143,7 +143,7 @@ function buildMenus() {
     offer(state.categories, "categories", filters.categories).map((c) => ({ value: c.id, label: `${c.icon} ${c.name}` })),
     filters.categories);
   multiSelect(bar.querySelector("#f-ms-who"), "Who",
-    offer(state.members, "who", filters.who).map((m) => ({ value: m.email, label: m.display_name })),
+    offer(state.members, "who", filters.who).map((m) => ({ value: m.email, label: isActive(m) ? m.display_name : `${m.display_name} (former)` })),
     filters.who);
   multiSelect(bar.querySelector("#f-ms-pay"), "Payment",
     offer(state.paymentMethods, "payments", filters.payments).map((p) => ({ value: p.id, label: p.name })),

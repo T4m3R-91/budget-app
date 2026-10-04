@@ -694,6 +694,21 @@ a.btn { display: inline-block; text-decoration: none; }
 .inline-form .icon-input { flex: 0 0 56px; text-align: center; }
 .li-row.editing { flex-wrap: wrap; }
 .acct { margin: 0 0 12px; }
+.acct-rename { margin-left: 4px; padding: 0 4px; }
+
+/* Profile → Household: each person with their status; an owner's ⋯ opens their actions. */
+.hh-person .li-name { font-weight: 600; }
+.hh-email { overflow-wrap: anywhere; }
+.hh-person.is-former .li-name, .hh-person.is-former .hh-email { opacity: 0.55; }
+.badge.hh-owner { color: var(--accent); border-color: var(--accent); }
+.badge.hh-invited { color: var(--warn); border-color: var(--warn); }
+.hh-menu { padding: 2px 0 10px; }
+.hh-menu .muted { margin: 8px 0 0; }
+.hh-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.hh-note { margin: 10px 0 0; }
+.hh-invite-btn { margin-top: 10px; }
+.hh-invite { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.hh-invite .muted { margin: 0; }
 
 /* Points (Profile): your total, then the household leaderboard. */
 .points-total {

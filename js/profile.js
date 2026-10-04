@@ -1,10 +1,14 @@
-// Profile: your account (password, sign-out), your points and the household leaderboard,
-// notifications on this device, the Settings card (collapsed until opened), and the Excel download
-// with when the last automatic backup ran.
+// Profile: your account (name, password, sign-out), the household (owners invite, deactivate and
+// change roles), your points and the household leaderboard, notifications on this device, the
+// Settings card (collapsed until opened), and the Excel download with when the last automatic
+// backup ran.
 
-import { state } from "./state.js";
+import { state, isActive, isOwner } from "./state.js";
 import { el, toast, friendlyError, friendlyDate, isoLocal } from "./ui.js";
-import { sb, fetchLeaderboard, fetchNotifySettings, saveNotifySettings, fetchBackupStatus } from "./db.js";
+import {
+  sb, reloadLists, fetchLeaderboard, fetchNotifySettings, saveNotifySettings, fetchBackupStatus,
+  inviteMember, cancelInvite, setMemberRole, setMemberActive, renameMe,
+} from "./db.js";
 import { settingsCard } from "./settings.js";
 import { exportToExcel } from "./export.js";
 import { appVersion } from "./offline.js";
@@ -20,6 +24,7 @@ export function showProfile() {
   document.getElementById("screen-profile").replaceChildren(
     el("h2", { class: "screen-title", text: "Profile" }),
     accountSection(),
+    householdSection(),
     el("section", { class: "set-section" }, el("h3", { text: "Points" }), pointsBox()),
     el("section", { class: "set-section" }, el("h3", { text: "Notifications" }), el("div", { id: "push-box" })),
     settingsCard(),
@@ -120,7 +125,9 @@ function pointsBox() {
   }
 
   const mine = board.rows.find((r) => r.email === state.me.email);
-  const ranked = board.rows.slice().sort((a, b) => b[period] - a[period] || a.display_name.localeCompare(b.display_name));
+  // Deactivated people keep their points but leave the leaderboard.
+  const current = (r) => isActive(state.members.find((m) => m.email === r.email) || {});
+  const ranked = board.rows.filter(current).sort((a, b) => b[period] - a[period] || a.display_name.localeCompare(b.display_name));
   const top = ranked[0]?.[period] || 0;
 
   return box(
@@ -332,9 +339,14 @@ function accountSection() {
     },
   }, pw, el("button", { type: "submit", class: "btn small secondary", text: "Change" }));
 
-  return el("section", { class: "set-section" },
+  // Your name as everyone sees it (you're the only one who can change it).
+  const nameLine = renaming ? renameForm() : el("p", { class: "acct" },
+    el("strong", { text: state.me.display_name }), el("span", { class: "muted", text: ` · ${state.me.email}` }),
+    "role" in state.me ? el("button", { type: "button", class: "link-btn acct-rename", text: "Rename", onclick: () => { renaming = true; paintAccount(); } }) : null);
+
+  return el("section", { class: "set-section", id: "account" },
     el("h3", { text: "Account" }),
-    el("p", { class: "acct" }, el("strong", { text: state.me.display_name }), el("span", { class: "muted", text: ` · ${state.me.email}` })),
+    nameLine,
     pwForm,
     el("button", {
       type: "button", class: "btn secondary full", text: "Sign out",
@@ -344,4 +356,178 @@ function accountSection() {
         sb.auth.signOut();
       },
     }));
+}
+
+let renaming = false;
+const paintAccount = () => document.getElementById("account")?.replaceWith(accountSection());
+
+function renameForm() {
+  const input = el("input", { class: "text-input", maxlength: 40, value: state.me.display_name, "aria-label": "Your name" });
+  setTimeout(() => input.focus(), 0);
+  return el("form", {
+    class: "inline-form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return toast("Type a name.");
+      if (!navigator.onLine) return toast("Renaming needs a connection.");
+      try {
+        await renameMe(name);
+        await refreshPeople();
+        renaming = false;
+        toast("Name changed");
+        showProfile(); // the leaderboard and household list show it too
+      } catch (err) {
+        toast(friendlyError(err));
+      }
+    },
+  }, input,
+  el("button", { type: "submit", class: "btn small secondary", text: "Save" }),
+  el("button", { type: "button", class: "btn small secondary", text: "Cancel", onclick: () => { renaming = false; paintAccount(); } }));
+}
+
+// The household's list again (after a change), and you in it.
+async function refreshPeople() {
+  await reloadLists();
+  state.me = state.members.find((m) => m.email === state.me.email) || state.me;
+}
+
+// ---------- the household (household-migration.sql) ----------
+// Everyone sees who's in it; owners invite people, change roles, deactivate and reactivate.
+
+let menuFor = null;   // the person whose options are open
+let armed = null;     // "deactivate|email" or "cancel|email": waiting for a second tap
+let inviting = false; // the invite form is open
+let busy = false;     // a change is being saved
+
+const statusOf = (m) => (!isActive(m) ? "Deactivated" : !m.joined_at ? "Invited" : m.role === "owner" ? "Owner" : "Member");
+const paintHousehold = () => document.getElementById("household")?.replaceWith(householdSection());
+
+function householdSection() {
+  const body = !("role" in state.me)
+    ? [el("p", { class: "muted small", text: "Managing the household isn't set up yet. Run household-migration.sql in Supabase." })]
+    : [
+        el("div", { class: "li-list" }, people().map(personRow)),
+        isOwner() ? inviteBlock() : el("p", { class: "muted small hh-note", text: "Owners can invite or deactivate people." }),
+      ];
+  return el("section", { class: "set-section", id: "household" }, el("h3", { text: "Household" }), ...body);
+}
+
+// Owners, members, invites still waiting, then people who were deactivated.
+function people() {
+  const rank = (m) => (!isActive(m) ? 3 : !m.joined_at ? 2 : m.role === "owner" ? 0 : 1);
+  return state.members.slice().sort((a, b) => rank(a) - rank(b) || a.display_name.localeCompare(b.display_name));
+}
+
+function personRow(m) {
+  const me = m.email === state.me.email;
+  const open = menuFor === m.email;
+  const status = statusOf(m);
+  return el("div", { class: `hh-person${isActive(m) ? "" : " is-former"}` },
+    el("div", { class: "li-row" },
+      el("div", { class: "li-main" },
+        el("div", { class: "li-name", text: me ? `${m.display_name} (you)` : m.display_name }),
+        el("div", { class: "muted small hh-email", text: m.email })),
+      el("span", { class: `badge hh-${status.toLowerCase()}`, text: status }),
+      isOwner() && !me
+        ? el("button", {
+            type: "button", class: "icon-btn", text: "⋯", "aria-label": `Options for ${m.display_name}`, "aria-expanded": String(open),
+            onclick: () => { menuFor = open ? null : m.email; armed = null; paintHousehold(); },
+          })
+        : null),
+    open ? personMenu(m) : null);
+}
+
+// A button that needs a second tap ("Tap again to deactivate").
+function twoTap(key, label, again, action) {
+  return el("button", {
+    type: "button", class: "btn small danger", disabled: busy, text: armed === key ? again : label,
+    onclick: () => (armed === key ? action() : ((armed = key), paintHousehold())),
+  });
+}
+
+function personMenu(m) {
+  const name = m.display_name;
+  const button = (label, cls, action) => el("button", { type: "button", class: `btn small ${cls}`, disabled: busy, text: label, onclick: action });
+  const buttons = [];
+  let note;
+  if (!isActive(m)) {
+    buttons.push(button("Reactivate", "primary", () => change(() => setMemberActive(m.email, true), `${name} can use the app again`)));
+    note = `${name}'s entries kept their name. Reactivating gives them access again.`;
+  } else {
+    if (m.joined_at) {
+      const toOwner = m.role !== "owner";
+      buttons.push(button(toOwner ? "Make owner" : "Make member", "secondary",
+        () => change(() => setMemberRole(m.email, toOwner ? "owner" : "member"), `${name} is now ${toOwner ? "an owner" : "a member"}`)));
+    } else {
+      buttons.push(twoTap(`cancel|${m.email}`, "Cancel invite", "Tap again to cancel", () => change(() => cancelInvite(m.email), `Invite to ${name} cancelled`)));
+    }
+    buttons.push(twoTap(`deactivate|${m.email}`, "Deactivate", "Tap again to deactivate", () => change(() => setMemberActive(m.email, false), `${name} was deactivated`)));
+    note = m.joined_at
+      ? `Deactivating ends ${name}'s access at once and stops their notifications. Their entries stay, under their name.`
+      : `${name} hasn't accepted the invite yet.`;
+  }
+  return el("div", { class: "hh-menu" }, el("div", { class: "hh-actions" }, buttons), el("p", { class: "muted small", text: note }));
+}
+
+// Saves a change, then shows the household as it is now.
+async function change(job, done) {
+  if (!navigator.onLine) return toast("Changing the household needs a connection.");
+  busy = true;
+  paintHousehold();
+  try {
+    await job();
+    await refreshPeople();
+    menuFor = null;
+    armed = null;
+    paintPoints(); // the leaderboard follows (deactivated people leave it)
+    toast(done);
+  } catch (e) {
+    toast(friendlyError(e));
+  }
+  busy = false;
+  paintHousehold();
+}
+
+function inviteBlock() {
+  if (!inviting) {
+    return el("button", {
+      type: "button", class: "btn secondary full hh-invite-btn", text: "+ Invite someone",
+      onclick: () => { inviting = true; paintHousehold(); document.getElementById("hh-email")?.focus(); },
+    });
+  }
+  const email = el("input", { id: "hh-email", class: "text-input", type: "email", inputmode: "email", autocomplete: "off", placeholder: "Their email", "aria-label": "Their email" });
+  const name = el("input", { class: "text-input", maxlength: 40, placeholder: "Their name, e.g. Sara", "aria-label": "Their name" });
+  const send = el("button", { type: "submit", class: "btn primary small", text: "Send invite" });
+  return el("form", {
+    class: "hh-invite", novalidate: true, // the app says what's missing, the same way on every phone
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const address = email.value.trim().toLowerCase();
+      const who = name.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return toast("Type their email address.");
+      if (!who) return toast("Type their name.");
+      if (!navigator.onLine) return toast("Inviting needs a connection.");
+      send.disabled = true;
+      send.textContent = "Sending…";
+      try {
+        const result = await inviteMember(address, who);
+        await refreshPeople();
+        inviting = false;
+        toast(result?.emailed === false
+          ? `${who} added. They already have an account, so they sign in with it (or use "Forgot password?").`
+          : `Invite sent to ${address}. ${who} shows as Invited until they sign in.`);
+        paintHousehold();
+      } catch (err) {
+        toast(friendlyError(err));
+        send.disabled = false;
+        send.textContent = "Send invite";
+      }
+    },
+  },
+  el("p", { class: "muted small", text: "They'll get an email with a link to choose a password, and join as a member." }),
+  email, name,
+  el("div", { class: "hh-actions" },
+    el("button", { type: "button", class: "btn secondary small", text: "Cancel", onclick: () => { inviting = false; paintHousehold(); } }),
+    send));
 }

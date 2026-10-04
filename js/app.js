@@ -2,8 +2,9 @@
 // between tabs. Also the offline side: the app's offline copy (sw.js) and its "Reload" for new
 // versions, the offline banner, and sending entries saved offline once the connection is back.
 
-import { configured, sb, reloadLists } from "./db.js";
-import { state } from "./state.js";
+import { configured, sb, reloadLists, myMembership, markJoined } from "./db.js";
+import { state, isActive } from "./state.js";
+import { idbClear } from "./store.js";
 import { el, toast, friendlyError, applyTheme, isNetworkError } from "./ui.js";
 import { showAdd, showEdit, showRecurringLog, showRecurringEdit, showFavorite } from "./entry.js";
 import { refreshRecurring } from "./recurring.js";
@@ -15,16 +16,18 @@ import { showDashboard, CHART_JS } from "./dashboard.js";
 import { FLATPICKR_JS, FLATPICKR_CSS } from "./filters.js";
 import { showProfile } from "./profile.js";
 import { showBudget, showBudgetEditor } from "./budget.js";
-import { refreshDevice } from "./push.js";
+import { refreshDevice, turnOff } from "./push.js";
 import { refreshInbox, showInbox } from "./inbox.js";
 
 window.__appStarted = true;
 
-// The link in a password-reset email opens the app with a one-time sign-in in the address
-// (#access_token=…&type=recovery), or with why it didn't work (#error_description=…). supabase-js
-// reads that sign-in and blanks the address as it starts, so note here which it was.
+// The link in a password-reset or invite email opens the app with a one-time sign-in in the
+// address (#access_token=…&type=recovery, or type=invite), or with why it didn't work
+// (#error_description=…). supabase-js reads that sign-in and blanks the address as it starts, so
+// note here which it was.
 const arrival = new URLSearchParams(location.hash.slice(1));
-const resetToken = arrival.get("type") === "recovery" ? arrival.get("access_token") : null;
+const linkType = arrival.get("type");
+const resetToken = linkType === "recovery" || linkType === "invite" ? arrival.get("access_token") : null;
 const resetLinkFailed = Boolean(arrival.get("error_description"));
 
 const $ = (id) => document.getElementById(id);
@@ -183,14 +186,16 @@ function showForgot(prefill = "") {
   email.focus();
 }
 
-// Opened from the reset link, already signed in by it: the new password comes first.
-function showNewPassword(session) {
+// Opened from a reset or invite link, already signed in by it: the (new) password comes first.
+function showNewPassword(session, invited = false) {
   showScreen("login");
+  const word = invited ? "Password" : "New password"; // someone invited never had one
+  const save = invited ? "Save password" : "Save new password";
   const field = (id, label) => el("input", { class: "text-input", type: "password", autocomplete: "new-password", minlength: 8, required: true, id, "aria-label": label });
-  const pw = field("new-password", "New password");
-  const again = field("new-password-again", "New password again");
+  const pw = field("new-password", word);
+  const again = field("new-password-again", `${word} again`);
   const error = el("p", { class: "form-error", role: "alert" });
-  const button = el("button", { type: "submit", class: "btn primary full", text: "Save new password" });
+  const button = el("button", { type: "submit", class: "btn primary full", text: save });
 
   const form = el("form", {
     onsubmit: async (e) => {
@@ -204,31 +209,46 @@ function showNewPassword(session) {
       if (err) {
         error.textContent = friendlyError(err);
         button.disabled = false;
-        button.textContent = "Save new password";
+        button.textContent = save;
         return;
       }
       await enterApp(session);
-      toast("Password changed");
+      toast(invited ? `Welcome, ${state.me?.display_name || "to the household"}!` : "Password changed");
     },
   },
-    el("label", { class: "field", for: "new-password" }, el("span", { text: "New password (8+ characters)" }), pw),
-    el("label", { class: "field", for: "new-password-again" }, el("span", { text: "New password again" }), again),
+    el("label", { class: "field", for: "new-password" }, el("span", { text: `${word} (8+ characters)` }), pw),
+    el("label", { class: "field", for: "new-password-again" }, el("span", { text: `${word} again` }), again),
     error,
     button);
 
   $("screen-login").replaceChildren(el("div", { class: "login-wrap" },
-    el("h1", { text: "Choose a new password" }),
-    el("p", { class: "sub", text: `For ${session.user.email}. Use it from now on to sign in, including in the app on your Home Screen.` }),
+    el("h1", { text: invited ? "Welcome to Household Budget" : "Choose a new password" }),
+    el("p", { class: "sub", text: invited
+      ? `You've been invited to the household. Choose a password for ${session.user.email}: you'll use it to sign in, including in the app on your Home Screen.`
+      : `For ${session.user.email}. Use it from now on to sign in, including in the app on your Home Screen.` }),
     form));
   pw.focus();
 }
 
-function showNotMember(email) {
+// Deactivated while the app was open: found out when it comes back to the front.
+async function stillInHousehold() {
+  if (!navigator.onLine || !state.me) return;
+  if ((await myMembership()) === "deactivated") showNotMember(state.me.email);
+}
+
+// Signed in, but not (or no longer) in the household. A deactivated person's phone also forgets
+// what it kept for offline use, and stops getting notifications.
+async function showNotMember(email) {
+  state.me = null; // nothing else runs or routes for them
   showScreen("notmember");
-  $("screen-notmember").replaceChildren(el("div", { class: "card-plain" },
-    el("h1", { text: "Not part of this household" }),
-    el("p", { text: `You're signed in as ${email}, but that email isn't in the household's member list. Ask whoever set up the app to add it.` }),
+  const card = (title, text) => $("screen-notmember").replaceChildren(el("div", { class: "card-plain" },
+    el("h1", { text: title }), el("p", { text }),
     el("button", { type: "button", class: "btn secondary", text: "Sign out", onclick: () => sb.auth.signOut() })));
+  card("Not part of this household", `You're signed in as ${email}, but that email isn't in the household's member list. Ask whoever set up the app to add it.`);
+  if ((await myMembership()) !== "deactivated") return;
+  card("You're no longer part of this household", `An owner has turned off access for ${email}. Ask them if you need it back.`);
+  idbClear("cache").catch(() => {});
+  turnOff().catch(() => {});
 }
 
 async function enterApp(session) {
@@ -241,8 +261,12 @@ async function enterApp(session) {
     return;
   }
   const email = session.user.email?.toLowerCase();
-  state.me = state.members.find((m) => m.email === email) || null;
+  state.me = state.members.find((m) => m.email === email && isActive(m)) || null;
   if (!state.me) return showNotMember(email);
+  if ("joined_at" in state.me && !state.me.joined_at) { // an invite's first sign-in: no longer "Invited"
+    markJoined();
+    state.me.joined_at = new Date().toISOString();
+  }
   route();
   refreshRecurring(); // the Budget tab's badge: recurring items due today or overdue
   syncOutbox(); // anything saved offline last time
@@ -275,7 +299,9 @@ async function backOnline() {
   // Opened offline, the lists (categories, members…) came from the phone: get the current ones.
   try {
     await reloadLists();
-    state.me = state.members.find((m) => m.email === state.me.email) || state.me;
+    const me = state.members.find((m) => m.email === state.me.email);
+    if (!me || !isActive(me)) return showNotMember(state.me.email); // deactivated meanwhile
+    state.me = me;
   } catch { /* keep the ones on screen */ }
   syncOutbox();
   refreshRecurring();
@@ -345,6 +371,7 @@ async function boot() {
     refreshRecurring(); // something may have come due, or been logged on the other phone
     refreshInbox(); // and notifications may have come in meanwhile
     syncOutbox();
+    stillInHousehold();
   });
   paintOfflineBanner();
   window.addEventListener("online", backOnline);
@@ -367,7 +394,7 @@ async function boot() {
   }
   if (resetToken || resetLinkFailed) history.replaceState(null, "", location.pathname + location.search); // no leftovers in the address
   // Signed in by the reset link itself (not by an earlier sign-in still on this phone).
-  if (resetToken && session?.access_token === resetToken) return showNewPassword(session);
+  if (resetToken && session?.access_token === resetToken) return showNewPassword(session, linkType === "invite");
   const linkProblem = resetToken || resetLinkFailed ? "That reset link has expired or was already used." : "";
   if (session) {
     await enterApp(session);
