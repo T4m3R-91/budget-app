@@ -17,6 +17,7 @@ import {
 import { scanReceipt } from "./receipt.js";
 import { monthStatus, monthOf, budgetMonth, openBudgetOn, compact } from "./budget.js";
 import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, handledStatus, scheduledFor, ordinal, shortDate } from "./recurring.js";
+import { bell } from "./inbox.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -310,8 +311,11 @@ function render() {
     : f.recurring ? titled(backToBudget(), `Log ${recurringLabel(f.recurring.item)}`)
     : el("div", { class: "entry-head centered" }, typeSeg());
   const adding = f.mode === "add" && !f.recurring;
+  // The greeting, with the notification center's bell at its right.
   const greeting = adding
-    ? el("p", { class: "greeting" }, `${GREETING[partOfDay()]}, `, el("strong", { text: state.me.display_name }))
+    ? el("div", { class: "greeting-row" },
+        el("p", { class: "greeting" }, `${GREETING[partOfDay()]}, `, el("strong", { text: state.me.display_name })),
+        bell())
     : null;
   // Adding: your favorites, under Expense | Income. A favorite's form: its emoji and name.
   const favs = adding ? [el("div", { id: "e-favs", class: "fav-row", hidden: !favorites })] : [];

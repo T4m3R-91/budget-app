@@ -16,6 +16,7 @@ import { FLATPICKR_JS, FLATPICKR_CSS } from "./filters.js";
 import { showProfile } from "./profile.js";
 import { showBudget, showBudgetEditor } from "./budget.js";
 import { refreshDevice } from "./push.js";
+import { refreshInbox, showInbox } from "./inbox.js";
 
 window.__appStarted = true;
 
@@ -28,12 +29,12 @@ const resetLinkFailed = Boolean(arrival.get("error_description"));
 
 const $ = (id) => document.getElementById(id);
 const TABS = { add: showAdd, history: showHistory, dashboard: showDashboard, budget: showBudget, profile: showProfile };
-const SCREENS = ["boot", "setup", "login", "notmember", "budgetform", ...Object.keys(TABS)];
+const SCREENS = ["boot", "setup", "login", "notmember", "budgetform", "inbox", ...Object.keys(TABS)];
 const WITH_ACTION_BAR = ["add", "budgetform"]; // screens with a pinned Save bar
 
 function showScreen(name, activeTab = name) {
   for (const s of SCREENS) $(`screen-${s}`).hidden = s !== name;
-  const inApp = name in TABS || name === "budgetform";
+  const inApp = name in TABS || name === "budgetform" || name === "inbox";
   $("tabbar").hidden = !inApp;
   document.body.classList.toggle("in-app", inApp);
   document.body.classList.toggle("has-action-bar", WITH_ACTION_BAR.includes(name));
@@ -73,6 +74,11 @@ function route() {
   if (hash.startsWith("#fav/")) { // a new favorite (#fav/new), or editing one
     showScreen("add");
     showFavorite(decodeURIComponent(hash.slice(5)));
+    return;
+  }
+  if (hash === "#notifications") { // the notification center, from the bell on the Add tab
+    showScreen("inbox", "add");
+    showInbox();
     return;
   }
   if (hash === "#settings") { // Settings now lives in Profile; old links and bookmarks land there
@@ -241,6 +247,7 @@ async function enterApp(session) {
   refreshRecurring(); // the Budget tab's badge: recurring items due today or overdue
   syncOutbox(); // anything saved offline last time
   refreshDevice(); // notifications on this device, if turned on (push.js)
+  refreshInbox(); // the bell's unread count
   setTimeout(prepareReceiptReader, 5000); // once, while online: so receipts can be scanned offline
 }
 
@@ -272,6 +279,7 @@ async function backOnline() {
   } catch { /* keep the ones on screen */ }
   syncOutbox();
   refreshRecurring();
+  refreshInbox();
   setTimeout(prepareReceiptReader, 5000); // if the app was opened offline, it wasn't prepared yet
   if (!document.getElementById("screen-add").hidden && !location.hash.startsWith("#edit/")) return; // keep a half-typed entry as is
   route();
@@ -299,8 +307,11 @@ function startOfflineCopy() {
   const sw = navigator.serviceWorker;
   const hadController = Boolean(sw.controller);
   sw.addEventListener("controllerchange", () => { if (hadController) location.reload(); }); // after Reload
-  sw.addEventListener("message", (event) => { // a notification was tapped: go to what it's about
+  sw.addEventListener("message", (event) => {
+    // A notification was tapped: go to what it's about.
     if (event.data?.type === "open") location.hash = new URL(event.data.url).hash || "#add";
+    // One arrived while the app is open: the bell counts it.
+    if (event.data?.type === "pushed" && state.me) refreshInbox();
   });
   sw.register("sw.js").then((reg) => {
     const offer = (worker) => {
@@ -332,6 +343,7 @@ async function boot() {
     applyTheme();
     if (!state.me) return;
     refreshRecurring(); // something may have come due, or been logged on the other phone
+    refreshInbox(); // and notifications may have come in meanwhile
     syncOutbox();
   });
   paintOfflineBanner();
