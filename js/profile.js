@@ -165,7 +165,7 @@ const switchEl = (on, label, onclick, disabled = false) =>
 
 // ---------- your settings, for all your devices (reminders-migration.sql) ----------
 
-const DEFAULT_PREFS = { reminders: true, reminder_hour: 9, show_amounts: true };
+const DEFAULT_PREFS = { reminders: true, reminder_hour: 9, show_amounts: true, partner_activity: true };
 let prefs = { status: "loading" }; // loading | ready | missing | error, plus the settings when ready
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo";
 
@@ -208,25 +208,32 @@ const hourLabel = (h) => `${h % 12 || 12}:00 ${h < 12 ? "AM" : "PM"}`;
 
 function prefRows() {
   const note = (text, ...more) => [el("p", { class: "muted small push-note" }, text, ...more)];
-  if (prefs.status === "loading") return note("Loading your reminder settings…");
+  if (prefs.status === "loading") return note("Loading your notification settings…");
   if (prefs.status === "missing") return note("Reminders aren't set up yet. Run reminders-migration.sql in Supabase.");
   if (prefs.status === "error") {
-    return note(`Couldn't load your reminder settings. ${prefs.message} `,
+    return note(`Couldn't load your notification settings. ${prefs.message} `,
       el("button", { type: "button", class: "link-btn", text: "Try again", onclick: loadPrefs }));
   }
   const hour = el("select", {
     class: "hour-select", "aria-label": "Reminder time", value: String(prefs.reminder_hour),
     onchange: (e) => setPref({ reminder_hour: Number(e.target.value) }),
   }, Array.from({ length: 24 }, (_, h) => el("option", { value: String(h), text: hourLabel(h) })));
+  // Show amounts first: it applies to every notification (reminders and partner activity).
   return [
+    pushRow("Show amounts",
+      el("span", { class: "muted small", text: prefs.show_amounts ? "In notifications: 🏠 Rent · EGP 12,000." : "Off. Notifications show names only." }),
+      switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
     pushRow("Reminders",
       prefs.reminders
         ? el("span", { class: "muted small" }, "What's due today or overdue, every day at ", hour)
         : el("span", { class: "muted small", text: "Off. No reminders are sent." }),
       switchEl(prefs.reminders, "Reminders", () => setPref({ reminders: !prefs.reminders }))),
-    pushRow("Show amounts",
-      el("span", { class: "muted small", text: prefs.show_amounts ? "In notifications: 🏠 Rent · EGP 12,000." : "Off. Notifications show names only." }),
-      switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
+    pushRow("Partner activity",
+      el("span", {
+        class: "muted small",
+        text: prefs.partner_activity ? "When partner(s) add an entry or schedule a payment." : "Off. Nothing is sent when partner(s) add or schedule.",
+      }),
+      switchEl(prefs.partner_activity, "Partner activity", () => setPref({ partner_activity: !prefs.partner_activity }))),
   ];
 }
 

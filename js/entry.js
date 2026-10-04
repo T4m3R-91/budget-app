@@ -11,7 +11,7 @@ import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
-  insertRecurring, deleteRecurring, linkToRecurring,
+  insertRecurring, deleteRecurring, linkToRecurring, notifyActivity,
   fetchFavorites, insertFavorite, updateFavorite, deleteFavorite, useFavorite,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
@@ -856,6 +856,7 @@ async function save_() {
     // its date, then monthly or yearly if it repeats) until it's logged at that day's rate.
     if (form.mode === "add" && !form.recurring && form.date > isoLocal()) {
       const item = await insertRecurring({ ...itemFields(), ...(form.repeat ? {} : schedule("once")), starts_on: form.date });
+      notifyActivity("scheduled", item.id);
       if (form.fromFav) countUse(form.fromFav);
       toast(`Scheduled ${recurringLabel(item)} · ${fmtMoney(item.amount, item.currency, { code: true })} for ${shortDate(form.date)}${form.repeat ? `, then ${form.repeat}${untilNote}` : ""}`, {
         label: "Undo",
@@ -888,6 +889,8 @@ async function save_() {
         repeatNote = ` · couldn't set it to repeat (${friendlyError(e)})`;
       }
     }
+    // One notification for the others, repeat and all (after the repeat is set up, so it can say so).
+    notifyActivity(form.recurring ? "log" : itemId ? "repeat" : "entry", saved.id);
     // Points are scored by the database; `points` is absent until points-migration.sql has run.
     const earned = Number.isInteger(saved.points) ? saved.points : null;
     toast(`${form.recurring ? "Logged" : "Saved"} ${nameOf(saved) || ""} · ${fmtMoney(saved.amount, saved.currency, { code: true })}${earned ? ` · +${earned} pts` : ""}${repeatNote}`, {
