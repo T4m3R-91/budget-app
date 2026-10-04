@@ -7,7 +7,7 @@
 // as the item logged. Anything left open stays due (overdue) until it's logged or skipped.
 
 import { state, byId } from "./state.js";
-import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate } from "./ui.js";
+import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate, spotlight } from "./ui.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, skipOccurrence, unskipOccurrence,
@@ -90,8 +90,9 @@ export function firstOpenDue(item, from = isoLocal()) {
   return due;
 }
 
-// Saves an edit taking over from `date` (the new schedule's first due date). Resolves { from, note }:
-// the date it actually takes over from, and why it's later when it is.
+// Saves an edit taking over from `date` (the new schedule's first due date). Resolves { from, note,
+// id }: the date it actually takes over from, why it's later when it is, and the item that now
+// carries the schedule (the same one, or the new one taking over).
 // The item's last occurrence that's logged, matched or skipped: { due, status }, or null.
 function lastDone(itemId) {
   return [...data.handled.entries()]
@@ -118,7 +119,7 @@ export async function saveItemEdit(item, fields, date) {
   // simply change it.
   if (!last && (item.frequency === "once" || !occurrencesThrough(item, addMonths(firstOf(from), -1)).length)) {
     await updateRecurring(item.id, { ...fields, starts_on: from });
-    return { from, note };
+    return { from, note, id: item.id };
   }
   const endOld = dayBefore(firstOf(from));
   const created = await insertRecurring({ ...fields, starts_on: from, ended_on: "ended_on" in fields ? fields.ended_on : item.ended_on ?? null });
@@ -128,7 +129,7 @@ export async function saveItemEdit(item, fields, date) {
     await deleteRecurring(created.id).catch(() => {}); // don't leave both running
     throw e;
   }
-  return { from, note };
+  return { from, note, id: created.id };
 }
 
 // "🏠 Rent": the item's note if it has one, else its subcategory, category or income source.
@@ -307,6 +308,20 @@ export function paintRecurring(month = viewMonth) {
   const box = document.getElementById("r-card");
   if (!box || !month) return;
   box.replaceChildren(el("div", { class: "card-head" }, el("h3", { text: "Scheduled" })), ...cardBody(month));
+  if (spotlightItem && data.status !== "idle") showSpotlight(box);
+}
+
+// A notification about a scheduled payment opens the Budget tab on its month with its row
+// highlighted (once the card has loaded).
+let spotlightItem = null;
+export function spotlightScheduled(itemId) {
+  spotlightItem = itemId;
+  paintRecurring();
+}
+function showSpotlight(box) {
+  const row = box.querySelector(`.rec-row[data-item="${CSS.escape(spotlightItem)}"]`);
+  spotlightItem = null;
+  if (row) spotlight(row);
 }
 
 function cardBody(month) {
@@ -366,7 +381,7 @@ function rowEl({ item, due }, today) {
   const source = income ? byId(state.incomeSources, item.income_source_id) : byId(state.categories, item.category_id);
   const every = repeats(item) ? `↻ ${item.frequency === "yearly" ? "Yearly" : "Monthly"}` : null;
   const details = [byId(state.subcategories, item.subcategory_id)?.name, item.description, every].filter(Boolean).join(" · ");
-  return el("li", { class: `rec-row ${status} ${income ? "income" : "expense"}` },
+  return el("li", { class: `rec-row ${status} ${income ? "income" : "expense"}`, "data-item": item.id },
     el("div", { class: "rec-line" },
       el("button", {
         type: "button", class: "rec-name", "aria-expanded": String(menuFor === k),
@@ -494,10 +509,14 @@ async function skipNow(item, due, button) {
   button.disabled = true;
   try {
     await skipOccurrence(item.id, due);
+    notifyActivity("skip", item.id, { due });
     toast(`Skipped ${recurringLabel(item)} (${shortDate(due)})`, {
       label: "Undo",
       run: async () => {
-        try { await unskipOccurrence(item.id, due); } catch (e) { toast(friendlyError(e)); }
+        try {
+          await unskipOccurrence(item.id, due);
+          notifyActivity("unskip", item.id, { due }); // replaces the skip, if they haven't read it yet
+        } catch (e) { toast(friendlyError(e)); }
         refreshRecurring();
       },
     });
@@ -511,6 +530,7 @@ async function unskipNow(item, due, button) {
   button.disabled = true;
   try {
     await unskipOccurrence(item.id, due);
+    notifyActivity("unskip", item.id, { due });
     toast(`${recurringLabel(item)} (${shortDate(due)}) is back`);
   } catch (e) {
     toast(friendlyError(e));

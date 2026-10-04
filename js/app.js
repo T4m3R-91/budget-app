@@ -7,7 +7,7 @@ import { state, isActive } from "./state.js";
 import { idbClear } from "./store.js";
 import { el, toast, friendlyError, applyTheme, isNetworkError } from "./ui.js";
 import { showAdd, showEdit, showRecurringLog, showRecurringEdit, showFavorite } from "./entry.js";
-import { refreshRecurring } from "./recurring.js";
+import { refreshRecurring, spotlightScheduled } from "./recurring.js";
 import { syncOutbox } from "./outbox.js";
 import { dataAsOf, clearStale } from "./offline.js";
 import { prepareReceiptReader } from "./receipt.js";
@@ -15,7 +15,7 @@ import { showHistory } from "./history.js";
 import { showDashboard, CHART_JS } from "./dashboard.js";
 import { FLATPICKR_JS, FLATPICKR_CSS } from "./filters.js";
 import { showProfile } from "./profile.js";
-import { showBudget, showBudgetEditor } from "./budget.js";
+import { showBudget, showBudgetEditor, openBudgetOn } from "./budget.js";
 import { refreshDevice, turnOff } from "./push.js";
 import { refreshInbox, showInbox } from "./inbox.js";
 
@@ -77,6 +77,23 @@ function route() {
   if (hash.startsWith("#fav/")) { // a new favorite (#fav/new), or editing one
     showScreen("add");
     showFavorite(decodeURIComponent(hash.slice(5)));
+    return;
+  }
+  // A notification about an entry: History, on it. About a scheduled payment or a budget: the
+  // Budget tab on its month, the payment's row highlighted. The address becomes the tab's own.
+  if (hash.startsWith("#history/")) {
+    history.replaceState(null, "", "#history");
+    showScreen("history");
+    showHistory(decodeURIComponent(hash.slice(9)));
+    return;
+  }
+  if (hash.startsWith("#month/")) {
+    const [month, itemId] = hash.slice(7).split("/");
+    history.replaceState(null, "", "#budget");
+    if (/^\d{4}-\d{2}-01$/.test(month)) openBudgetOn(month);
+    showScreen("budget");
+    showBudget();
+    if (itemId) spotlightScheduled(decodeURIComponent(itemId));
     return;
   }
   if (hash === "#notifications") { // the notification center, from the bell on the Add tab

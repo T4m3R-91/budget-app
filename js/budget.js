@@ -7,7 +7,7 @@
 import { state, byId } from "./state.js";
 import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate } from "./ui.js";
 import { parseAmount } from "./numbers.js";
-import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate } from "./db.js";
+import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate, notifyActivity } from "./db.js";
 import { paintRecurring, refreshRecurring, furthestDueMonth, scheduledFor } from "./recurring.js";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -299,7 +299,7 @@ export async function showBudgetEditor(yearMonth) {
     return;
   }
   const month = `${yearMonth}-01`;
-  const form = (editor = { month, saving: false });
+  const form = (editor = { month, saving: false, before: [] });
   screen.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
 
   const since = shiftMonth(month, -3);
@@ -320,6 +320,7 @@ export async function showBudgetEditor(yearMonth) {
   const active = new Set(history.map((r) => monthOf(r.occurred_on))).size;
   const totals = spentBy(history);
   const current = toMap(existing);
+  form.before = existing.map((r) => ({ category_id: r.category_id, amount_egp: Number(r.amount_egp) })); // for the others' notification
   form.span = `${monthName(since).slice(0, 3)}–${monthShort(shiftMonth(month, -1))}`;
   form.lines = state.categories
     .filter((c) => !c.hidden || current.has(c.id))
@@ -397,6 +398,7 @@ async function saveEditor(inputs, button) {
   const name = monthName(form.month);
   try {
     await saveBudget(form.month, items);
+    notifyActivity("budget", form.month, { before: form.before }); // the others see what changed
     card.data.delete(form.month);
     card.next = form.month; // back on the Budget tab, show the month just set
     toast(items.length ? `${name} budget saved` : `${name} budget cleared`);
