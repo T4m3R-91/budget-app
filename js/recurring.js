@@ -1,7 +1,8 @@
 // Recurring items (rent, salary, subscriptions…) that repeat monthly or yearly. Nothing is logged
 // automatically: each due date shows on the Budget tab's Recurring card to Log (one tap, dated
 // today, or on a day picked with its ▾, at that day's rate; a flat 5 points) or Skip, and the
-// Budget tab icon counts what's due. An entry typed
+// Budget tab icon (and the app's icon) counts what's due. The notify function's morning reminders
+// (supabase/functions/notify) repeat this file's due rules, so keep the two alike. An entry typed
 // by hand in the same month with the same category (or income source), currency and amount counts
 // as the item logged. Anything left open stays due (overdue) until it's logged or skipped.
 
@@ -283,6 +284,15 @@ function paintBadge() {
   badge.hidden = !count;
   badge.textContent = count > 9 ? "9+" : String(count);
   badge.closest("a")?.setAttribute("aria-label", count ? `Budget, ${count} due` : "Budget");
+  if (data.status === "ready") paintIconBadge(count);
+}
+
+// The same count on the app's icon (the Home Screen app; on Windows, the installed app). The
+// morning reminder sets it too (sw.js); opening the app brings it up to date.
+function paintIconBadge(count) {
+  try {
+    (count ? navigator.setAppBadge?.(count) : navigator.clearAppBadge?.())?.catch(() => {});
+  } catch { /* not supported */ }
 }
 
 // ---------- the Budget tab's Recurring card (follows the tab's month switcher) ----------

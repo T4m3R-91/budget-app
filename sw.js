@@ -6,7 +6,7 @@
 // phone then fetches the new files in the background and the app offers "Reload". Profile shows
 // this version, so it always names the files actually running on the phone.
 
-const VERSION = "2.9.0";
+const VERSION = "2.10.1";
 const APP = `app-${VERSION}`;
 const LIBS = "libs"; // CDN libraries: their URLs name their version, so they're kept across releases
 
@@ -83,18 +83,28 @@ async function keepLibs(urls) {
 
 // ---------- notifications ----------
 
-// A message from the notify function: { title, body, url, tag }. Each one must show a notification:
-// browsers stop delivering to apps that receive them silently.
+// A message from the notify function: { title, body, url, tag, badge }. Each one must show a
+// notification: browsers stop delivering to apps that receive them silently. badge (the morning
+// reminder's): how many payments are due, for the app's icon.
 self.addEventListener("push", (event) => {
   let msg;
   try { msg = event.data?.json() || {}; } catch { msg = { body: event.data?.text() }; }
-  event.waitUntil(self.registration.showNotification(msg.title || "Household Budget", {
-    body: msg.body || "",
-    icon: "icons/icon-192.png",
-    tag: msg.tag || "",
-    data: { url: msg.url || "./" },
-  }));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(msg.title || "Household Budget", {
+      body: msg.body || "",
+      icon: "icons/icon-192.png",
+      tag: msg.tag || "",
+      data: { url: msg.url || "./" },
+    }),
+    typeof msg.badge === "number" ? iconBadge(msg.badge) : null,
+  ]));
 });
+
+async function iconBadge(count) {
+  try {
+    await (count ? self.navigator.setAppBadge?.(count) : self.navigator.clearAppBadge?.());
+  } catch { /* not supported, or not allowed */ }
+}
 
 // Tapping one opens the app on the screen it's about: the open app is told where to go (a new
 // address would restart it), or the app opens there.
