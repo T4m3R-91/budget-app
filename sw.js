@@ -6,7 +6,7 @@
 // phone then fetches the new files in the background and the app offers "Reload". Profile shows
 // this version, so it always names the files actually running on the phone.
 
-const VERSION = "2.12.1";
+const VERSION = "2.12.2";
 const APP = `app-${VERSION}`;
 const LIBS = "libs"; // CDN libraries: their URLs name their version, so they're kept across releases
 

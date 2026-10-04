@@ -3,6 +3,7 @@
 // opening the list marks it all read, and tapping one goes where it points. The function keeps a
 // copy of each (public.notifications, inbox-migration.sql), with or without a device turned on.
 
+import { state } from "./state.js";
 import { el, friendlyError, friendlyDate, isoLocal } from "./ui.js";
 import { fetchInbox, markInboxRead } from "./db.js";
 
@@ -74,34 +75,65 @@ const target = (url) => new URL(url || "./", location.href).hash || "#add";
 function paintInbox() {
   const box = document.getElementById("screen-inbox");
   if (!box) return;
-  const note = (text, ...more) => el("p", { class: "muted small inbox-note" }, text, ...more);
+  const foot = (text, ...more) => el("div", { class: "list-foot" }, text, ...more);
   let body;
-  if (inbox.status === "idle") body = [note("Loading…")];
-  else if (inbox.status === "missing") body = [note("The notification list isn't set up yet. Run inbox-migration.sql in Supabase.")];
+  if (inbox.status === "idle") body = [foot("Loading…")];
+  else if (inbox.status === "missing") body = [foot("The notification list isn't set up yet. Run inbox-migration.sql in Supabase.")];
   else if (inbox.status === "error") {
-    body = [note(`Couldn't load notifications. ${inbox.message} `, el("button", { type: "button", class: "link-btn", text: "Try again", onclick: refreshInbox }))];
+    body = [foot(`Couldn't load notifications. ${inbox.message} `, el("button", { type: "button", class: "link-btn", text: "Try again", onclick: refreshInbox }))];
   } else if (!inbox.rows.length) {
-    body = [note("Nothing yet. Reminders and partner activity from the last 30 days show up here.")];
+    body = [foot("Nothing yet. Reminders and partner activity from the last 30 days show up here.")];
   } else {
-    // By day, newest first: Today, Yesterday, 2 Oct…
-    const days = new Map();
+    // As History: by day, newest first (Today, Yesterday, 2 Oct…), a card each.
+    body = [];
+    let lastDay = null;
     for (const n of inbox.rows) {
       const day = isoLocal(new Date(n.created_at));
-      if (!days.has(day)) days.set(day, []);
-      days.get(day).push(n);
+      if (day !== lastDay) body.push(el("h3", { class: "hist-date", text: friendlyDate(day) }));
+      lastDay = day;
+      body.push(card(n));
     }
-    body = [...days].map(([day, list]) => el("section", { class: "inbox-day" },
-      el("h3", { text: friendlyDate(day) }),
-      el("ul", { class: "inbox-list" }, list.map((n) => el("li", {},
-        el("a", { class: `inbox-item${fresh.has(n.id) || !n.read_at ? " unread" : ""}`, href: target(n.url) },
-          el("span", { class: "inbox-icon", "aria-hidden": "true", text: n.kind === "reminder" ? "⏰" : "👤" }),
-          el("span", { class: "inbox-main" },
-            el("span", { class: "inbox-title", text: n.title }),
-            n.body ? el("span", { class: "inbox-body", text: n.body }) : null),
-          el("span", { class: "inbox-time", text: time(n.created_at) })))))));
-    body.push(note("Notifications from the last 30 days."));
+    body.push(foot("Notifications from the last 30 days."));
   }
   box.replaceChildren(
     el("div", { class: "entry-head" }, el("a", { class: "link-btn", href: "#add", text: "Back" }), el("h2", { text: "Notifications" }), el("span")),
     ...body);
+}
+
+// Amounts in a notification's text: "EGP 450", "USD 15.99", "+EGP 22,000" (income has the +).
+const AMOUNT = /\+?(?:EGP|USD) \d[\d,]*(?:\.\d+)?/g;
+
+// Income or a payment, from what the notification says: its amounts (all with + is income), or
+// with Show amounts off, the income source its title names.
+function isIncome(n) {
+  const amounts = (n.body || "").match(AMOUNT) || [];
+  if (amounts.length) return amounts.every((a) => a.startsWith("+"));
+  return state.incomeSources.some((s) => n.title.includes(`${s.icon} ${s.name}`));
+}
+
+// The text with its amounts as History shows them: red with − for a payment, green with + for income.
+function bodyText(body) {
+  const parts = [];
+  let at = 0;
+  for (const m of body.matchAll(AMOUNT)) {
+    const income = m[0].startsWith("+");
+    parts.push(body.slice(at, m.index), el("span", { class: `inbox-amt ${income ? "in" : "out"}`, text: income ? m[0] : `−${m[0]}` }));
+    at = m.index + m[0].length;
+  }
+  parts.push(body.slice(at));
+  return el("span", { class: "txn-sub inbox-body" }, ...parts);
+}
+
+// One notification as one of History's cards (its shape, icon tile and red or green), with its own
+// text: ⏰ for a reminder, 👤 for partner activity, the title, the text under it, and the time at
+// the right, after a dot while it's new.
+function card(n) {
+  return el("a", { class: `txn-row inbox-card ${isIncome(n) ? "income" : "expense"}`, href: target(n.url) },
+    el("span", { class: "txn-ico", "aria-hidden": "true", text: n.kind === "reminder" ? "⏰" : "👤" }),
+    el("span", { class: "txn-main" },
+      el("span", { class: "txn-title", text: n.title }),
+      n.body ? bodyText(n.body) : null),
+    el("span", { class: "inbox-when" },
+      fresh.has(n.id) || !n.read_at ? el("span", { class: "inbox-dot", "aria-label": "New" }) : null,
+      time(n.created_at)));
 }
