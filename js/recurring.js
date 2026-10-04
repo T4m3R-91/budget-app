@@ -11,7 +11,7 @@ import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate } from "./ui
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, skipOccurrence, unskipOccurrence,
-  fetchUnlinkedBetween, insertTransaction, deleteTransaction, latestEntryRate,
+  fetchUnlinkedBetween, insertTransaction, deleteTransaction, latestEntryRate, notifyActivity,
 } from "./db.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -468,6 +468,7 @@ async function logNow(item, due, button, on = isoLocal()) {
       income_source_id: expense ? null : item.income_source_id, payment_method_id: expense ? item.payment_method_id : null,
       who: item.who, description: item.description, recurring_id: item.id, recurring_due_on: due,
     });
+    notifyActivity("log", saved.id); // the others hear it's been paid (or received)
     const pts = Number.isInteger(saved.points) ? saved.points : null;
     logDates.delete(key(item.id, due));
     const dated = on === isoLocal() ? "today" : `on ${shortDate(on)}`;

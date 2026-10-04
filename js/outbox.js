@@ -5,7 +5,7 @@
 // entry that syncs on a later day doesn't get the same-day bonus.
 
 import { idbAll, idbPut, idbDelete } from "./store.js";
-import { insertTransaction } from "./db.js";
+import { insertTransaction, notifyActivity } from "./db.js";
 import { getRateOn } from "./fx.js";
 import { toast, friendlyError, isNetworkError } from "./ui.js";
 
@@ -52,6 +52,7 @@ async function send() {
     if (day) Object.assign(row, { rate: day.rate, rate_source: "historical" });
     try {
       const saved = await insertTransaction(row);
+      notifyActivity(row.recurring_id ? "log" : "entry", saved.id); // the others hear about it now
       points += Number.isInteger(saved.points) ? saved.points : 0;
       sent++;
       if (day) rerated++;

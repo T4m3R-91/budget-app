@@ -227,18 +227,29 @@ export async function forgetPushDevice(endpoint) {
 }
 
 // Your notification settings, for all your devices (reminders-migration.sql): { reminders,
-// reminder_hour, show_amounts, time_zone }, or null when you have no row yet (the defaults apply).
-// "missing" until the migration has run.
+// reminder_hour, show_amounts, partner_activity, time_zone, … }, or null when you have no row yet
+// (the defaults apply). "missing" until the migration has run. partner_activity is absent until
+// activity-migration.sql has run.
 export function fetchNotifySettings() {
   return cached(`notify-settings:${state.me?.email}`, async () => {
-    const { data, error } = await sb.from("notification_settings").select("reminders, reminder_hour, show_amounts, time_zone").maybeSingle();
+    const { data, error } = await sb.from("notification_settings").select("*").maybeSingle();
     if (isMissingTable(error)) return "missing";
     return unwrap({ data, error });
   });
 }
 
 export async function saveNotifySettings(patch) {
-  unwrap(await sb.from("notification_settings").upsert({ owner: state.me.email, ...patch, updated_at: new Date().toISOString() }));
+  const { error } = await sb.from("notification_settings").upsert({ owner: state.me.email, ...patch, updated_at: new Date().toISOString() });
+  if (error?.code === "PGRST204" && "partner_activity" in patch) throw new Error("Partner activity isn't set up yet. Run activity-migration.sql in Supabase.");
+  if (error) throw error;
+}
+
+// Right after you save something new: the notify function tells the rest of the household.
+// kind: "entry", "repeat" (an entry set to repeat), "log" (a scheduled payment logged) with the
+// entry's id, or "scheduled" with the scheduled payment's id. Nothing waits for it, and nothing
+// is said if it fails (offline, or the function isn't updated yet).
+export function notifyActivity(kind, id) {
+  sb.functions.invoke("notify", { body: { action: "activity", kind, id } }).catch(() => {});
 }
 
 // Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed,
