@@ -259,13 +259,13 @@ function prefRows() {
       switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
     pushRow("Reminders",
       prefs.reminders
-        ? el("span", { class: "muted small" }, "What's due today or overdue, every day at ", hour)
+        ? el("span", { class: "muted small" }, "What's due today or overdue, every day at ", hour, ", and a nudge after a week with no entries.")
         : el("span", { class: "muted small", text: "Off. No reminders are sent." }),
       switchEl(prefs.reminders, "Reminders", () => setPref({ reminders: !prefs.reminders }))),
     pushRow("Partner activity",
       el("span", {
         class: "muted small",
-        text: prefs.partner_activity ? "When partner(s) add an entry or schedule a payment." : "Off. Nothing is sent when partner(s) add or schedule.",
+        text: prefs.partner_activity ? "When partner(s) add or change an entry, a scheduled payment or a budget." : "Off. Nothing is sent when partner(s) add or change things.",
       }),
       switchEl(prefs.partner_activity, "Partner activity", () => setPref({ partner_activity: !prefs.partner_activity }))),
   ];
