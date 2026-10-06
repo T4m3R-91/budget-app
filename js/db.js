@@ -176,6 +176,16 @@ export async function deleteRecurring(id) {
   unwrap(await sb.from("recurring_items").delete().eq("id", id));
 }
 
+// Changes a scheduled payment from a date on: it continues as a new one with these changes (the
+// rest carried over) and the old one ends on endOld, in one step, so the activity log shows one
+// change. Returns the new one's id, or null before activity-log-migration.sql has run.
+export async function continueRecurring(id, endOld, changes) {
+  const { data, error } = await sb.rpc("continue_scheduled", { p_id: id, p_end: endOld, p_changes: changes });
+  if (error?.code === "PGRST202") return null;
+  if (error) throw error;
+  return data;
+}
+
 export async function skipOccurrence(itemId, dueOn) {
   unwrap(await sb.from("recurring_skips").insert({ item_id: itemId, due_on: dueOn }));
 }
@@ -269,6 +279,28 @@ export function fetchInbox() {
 
 export async function markInboxRead() {
   unwrap(await sb.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null));
+}
+
+// ---------- the activity log (activity-log-migration.sql) ----------
+
+// A page of the household's activity log, newest first: LOG_PAGE lines from offset, or null until
+// the migration has run. The first page is kept on the phone, for offline.
+export const LOG_PAGE = 50;
+export function fetchActivity(offset = 0) {
+  const load = async () => {
+    const { data, error } = await sb.from("activity_log").select("*")
+      .order("at", { ascending: false }).order("id").range(offset, offset + LOG_PAGE - 1);
+    if (isMissingTable(error)) return null;
+    return unwrap({ data, error });
+  };
+  return offset ? load() : cached(`activity:${state.me?.email}`, load);
+}
+
+// An owner removes the record of a deletion. Anything else is refused by the database's rule
+// (nothing removed, no error), so that's an error here.
+export async function deleteActivity(id) {
+  const removed = unwrap(await sb.from("activity_log").delete().eq("id", id).select("id"));
+  if (!removed.length) throw new Error("Only owners can remove that.");
 }
 
 // Right after you save something: the notify function tells the rest of the household. New:

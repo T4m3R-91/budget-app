@@ -6,14 +6,14 @@
 // phone then fetches the new files in the background and the app offers "Reload". Profile shows
 // this version, so it always names the files actually running on the phone.
 
-const VERSION = "2.16.0";
+const VERSION = "2.17.0";
 const APP = `app-${VERSION}`;
 const LIBS = "libs"; // CDN libraries: their URLs name their version, so they're kept across releases
 
 const FILES = [
   "./", "index.html", "styles.css", "config.js", "manifest.webmanifest",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
-  "js/app.js", "js/budget.js", "js/dashboard.js", "js/db.js", "js/entry.js", "js/export.js",
+  "js/activity.js", "js/app.js", "js/budget.js", "js/dashboard.js", "js/db.js", "js/entry.js", "js/export.js",
   "js/filters.js", "js/fx.js", "js/history.js", "js/inbox.js", "js/numbers.js", "js/offline.js", "js/outbox.js",
   "js/profile.js", "js/push.js", "js/receipt-parse.js", "js/receipt.js", "js/recurring.js", "js/settings.js",
   "js/state.js", "js/store.js", "js/ui.js",

@@ -1,15 +1,23 @@
-// The notification center: what the notify function sent you in the last 30 days (reminders and
-// partner activity), behind the bell beside the Add tab's greeting. The bell counts what's unread;
-// opening the list marks it all read, and tapping one goes where it points. The function keeps a
-// copy of each (public.notifications, inbox-migration.sql), with or without a device turned on.
+// The notification center, behind the bell beside the Add tab's greeting, in two lists:
+// - For me: what the notify function sent you in the last 30 days (reminders and partner
+//   activity). The bell counts what's unread; opening the list marks it all read, and tapping one
+//   goes where it points. The function keeps a copy of each (public.notifications,
+//   inbox-migration.sql), with or without a device turned on.
+// - Everything: the household's activity log (activity.js): who added, changed or deleted what,
+//   for everyone to see, never counted on the bell. Owners can remove the record of a deletion.
 
 import { state } from "./state.js";
-import { el, friendlyError, friendlyDate, isoLocal } from "./ui.js";
-import { fetchInbox, markInboxRead } from "./db.js";
+import { el, friendlyError, friendlyDate, isoLocal, toast } from "./ui.js";
+import { fetchInbox, markInboxRead, fetchActivity, deleteActivity, LOG_PAGE } from "./db.js";
+import { describe, removable } from "./activity.js";
 
 const inbox = { status: "idle", rows: [], message: "" }; // idle | ready | missing | error
 let fresh = new Set(); // unread when the list was opened: shown as new until it's left
 let loading = null;
+let tab = "me"; // "me" (For me) or "all" (Everything)
+// The activity log as loaded so far: more, whether there's another page; armed, the line whose
+// Delete was tapped once.
+const log = { status: "idle", rows: [], message: "", more: false, loadingMore: false, armed: null };
 
 export function refreshInbox() {
   loading ??= load().finally(() => { loading = null; });
@@ -54,12 +62,21 @@ function paintBell(b = document.getElementById("bell")) {
   b.setAttribute("aria-label", n ? `Notifications, ${n} unread` : "Notifications");
 }
 
-// ---------- the list ----------
+// ---------- the screen ----------
 
-export async function showInbox() {
+// view: "me" from the bell; "all" when coming back to Everything (#notifications/everything).
+export async function showInbox(view = "me") {
+  tab = view;
+  log.armed = null;
   fresh = new Set();
+  if (tab === "all") loadLog();
   paintInbox();
   await refreshInbox();
+  if (tab === "me") readMine();
+}
+
+// For me, open: what's unread shows as new, and is marked read.
+function readMine() {
   fresh = new Set(inbox.rows.filter((n) => !n.read_at).map((n) => n.id));
   if (!fresh.size) return;
   paintInbox();
@@ -69,35 +86,56 @@ export async function showInbox() {
   markInboxRead().catch(() => { /* offline: they're still unread next time */ });
 }
 
+// The address follows the list, so coming back from where a line led returns to it.
+function switchTo(next) {
+  if (next === tab) return;
+  tab = next;
+  log.armed = null;
+  history.replaceState(null, "", next === "all" ? "#notifications/everything" : "#notifications");
+  if (tab === "all") loadLog();
+  paintInbox();
+  if (tab === "me") readMine();
+}
+
 const time = (iso) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const target = (url) => new URL(url || "./", location.href).hash || "#add";
+const foot = (text, ...more) => el("div", { class: "list-foot" }, text, ...more);
 
 function paintInbox() {
   const box = document.getElementById("screen-inbox");
   if (!box) return;
-  const foot = (text, ...more) => el("div", { class: "list-foot" }, text, ...more);
-  let body;
-  if (inbox.status === "idle") body = [foot("Loading…")];
-  else if (inbox.status === "missing") body = [foot("The notification list isn't set up yet. Run inbox-migration.sql in Supabase.")];
-  else if (inbox.status === "error") {
-    body = [foot(`Couldn't load notifications. ${inbox.message} `, el("button", { type: "button", class: "link-btn", text: "Try again", onclick: refreshInbox }))];
-  } else if (!inbox.rows.length) {
-    body = [foot("Nothing yet. Reminders and partner activity from the last 30 days show up here.")];
-  } else {
-    // As History: by day, newest first (Today, Yesterday, 2 Oct…), a card each.
-    body = [];
-    let lastDay = null;
-    for (const n of inbox.rows) {
-      const day = isoLocal(new Date(n.created_at));
-      if (day !== lastDay) body.push(el("h3", { class: "hist-date", text: friendlyDate(day) }));
-      lastDay = day;
-      body.push(card(n));
-    }
-    body.push(foot("Notifications from the last 30 days."));
-  }
+  const seg = el("div", { class: "seg small inbox-seg", role: "group", "aria-label": "Show" },
+    [["me", "For me"], ["all", "Everything"]].map(([key, label]) =>
+      el("button", { type: "button", class: tab === key ? "active" : "", "aria-pressed": String(tab === key), text: label, onclick: () => switchTo(key) })));
   box.replaceChildren(
     el("div", { class: "entry-head" }, el("a", { class: "link-btn", href: "#add", text: "Back" }), el("h2", { text: "Notifications" }), el("span")),
-    ...body);
+    seg,
+    ...(tab === "all" ? logList() : myList()));
+}
+
+// As History: by day, newest first (Today, Yesterday, 2 Oct…), a card each.
+function byDay(rows, when, card) {
+  const out = [];
+  let lastDay = null;
+  for (const row of rows) {
+    const day = isoLocal(new Date(when(row)));
+    if (day !== lastDay) out.push(el("h3", { class: "hist-date", text: friendlyDate(day) }));
+    lastDay = day;
+    out.push(card(row));
+  }
+  return out;
+}
+
+// ---------- For me ----------
+
+function myList() {
+  if (inbox.status === "idle") return [foot("Loading…")];
+  if (inbox.status === "missing") return [foot("The notification list isn't set up yet. Run inbox-migration.sql in Supabase.")];
+  if (inbox.status === "error") {
+    return [foot(`Couldn't load notifications. ${inbox.message} `, el("button", { type: "button", class: "link-btn", text: "Try again", onclick: refreshInbox }))];
+  }
+  if (!inbox.rows.length) return [foot("Nothing yet. Reminders and partner activity from the last 30 days show up here.")];
+  return [...byDay(inbox.rows, (n) => n.created_at, card), foot("Notifications from the last 30 days.")];
 }
 
 // Amounts in a notification's text: "EGP 450", "USD 15.99", "+EGP 22,000" (income has the +).
@@ -139,4 +177,83 @@ function card(n) {
     el("span", { class: "inbox-when" },
       fresh.has(n.id) || !n.read_at ? el("span", { class: "inbox-dot", "aria-label": "New" }) : null,
       time(n.created_at)));
+}
+
+// ---------- Everything: the activity log ----------
+
+async function loadLog() {
+  try {
+    const rows = await fetchActivity(0);
+    Object.assign(log, rows === null
+      ? { status: "missing", rows: [], more: false }
+      : { status: "ready", rows, more: rows.length === LOG_PAGE });
+  } catch (e) {
+    // Keep what's on screen; say so only when there's nothing to show.
+    Object.assign(log, { status: log.rows.length ? "ready" : "error", message: friendlyError(e) });
+  }
+  if (tab === "all") paintInbox();
+}
+
+async function loadMore() {
+  log.loadingMore = true;
+  paintInbox();
+  try {
+    const rows = await fetchActivity(log.rows.length);
+    const have = new Set(log.rows.map((l) => l.id));
+    log.rows.push(...rows.filter((l) => !have.has(l.id)));
+    log.more = rows.length === LOG_PAGE;
+  } catch (e) {
+    toast(friendlyError(e));
+  }
+  log.loadingMore = false;
+  paintInbox();
+}
+
+function logList() {
+  if (log.status === "idle") return [foot("Loading…")];
+  if (log.status === "missing") return [foot("The activity log isn't set up yet. Run activity-log-migration.sql in Supabase.")];
+  if (log.status === "error") {
+    return [foot(`Couldn't load the activity log. ${log.message} `,
+      el("button", { type: "button", class: "link-btn", text: "Try again", onclick: () => { log.status = "idle"; paintInbox(); loadLog(); } }))];
+  }
+  if (!log.rows.length) return [foot("Nothing yet. What anyone adds, changes or deletes from now on shows up here.")];
+  return [
+    ...byDay(log.rows, (l) => l.at, logCard),
+    log.more
+      ? foot(el("button", { type: "button", class: "btn secondary small", text: log.loadingMore ? "Loading…" : "Load more", disabled: log.loadingMore, onclick: loadMore }))
+      : foot("Everything from the last 12 months."),
+  ];
+}
+
+// A line as a card like For me's: its icon, what happened, the details, the time. A payment's red
+// and income's green; household, Settings and budget lines plain. A line about something deleted
+// leads nowhere, and owners can remove it (Delete, then Tap again).
+function logCard(line) {
+  const d = describe(line);
+  const del = removable(line)
+    ? el("button", { type: "button", class: "btn danger small log-del", text: log.armed === line.id ? "Tap again" : "Delete", onclick: (e) => removeLine(e, line) })
+    : null;
+  return el(d.href ? "a" : "div", { class: `txn-row inbox-card log-line${d.tone ? ` ${d.tone}` : ""}`, ...(d.href ? { href: d.href } : {}) },
+    el("span", { class: "txn-ico", "aria-hidden": "true", text: d.icon }),
+    el("span", { class: "txn-main" },
+      el("span", { class: "txn-title", text: d.title }),
+      d.body ? bodyText(d.body, d.signed) : null),
+    el("span", { class: "inbox-when log-when" }, time(line.at), del));
+}
+
+async function removeLine(e, line) {
+  e.preventDefault();
+  if (log.armed !== line.id) {
+    log.armed = line.id;
+    return paintInbox();
+  }
+  log.armed = null;
+  try {
+    await deleteActivity(line.id);
+    log.rows = log.rows.filter((l) => l.id !== line.id);
+    toast("Removed from the log");
+  } catch (err) {
+    toast(friendlyError(err));
+  }
+  paintInbox();
 }

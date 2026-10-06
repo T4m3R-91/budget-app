@@ -11,6 +11,11 @@ let editing = null; // "table:id" of the row being renamed
 let open = false; // the card starts collapsed; it stays as you left it while the app is open
 let card = null;
 
+// Opens the card next time Profile is drawn (an activity-log line about the lists leads here).
+export function openSettings() {
+  open = true;
+}
+
 export function settingsCard() {
   editing = null;
   card = el("section", { class: "set-section settings-card" });

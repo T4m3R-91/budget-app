@@ -5,7 +5,7 @@
 import { configured, sb, reloadLists, myMembership, markJoined } from "./db.js";
 import { state, isActive } from "./state.js";
 import { idbClear } from "./store.js";
-import { el, toast, friendlyError, applyTheme, isNetworkError } from "./ui.js";
+import { el, toast, friendlyError, applyTheme, isNetworkError, spotlight } from "./ui.js";
 import { showAdd, showEdit, showRecurringLog, showRecurringEdit, showFavorite } from "./entry.js";
 import { refreshRecurring, spotlightScheduled } from "./recurring.js";
 import { syncOutbox } from "./outbox.js";
@@ -15,6 +15,7 @@ import { showHistory } from "./history.js";
 import { showDashboard, CHART_JS } from "./dashboard.js";
 import { FLATPICKR_JS, FLATPICKR_CSS } from "./filters.js";
 import { showProfile } from "./profile.js";
+import { openSettings } from "./settings.js";
 import { showBudget, showBudgetEditor, openBudgetOn } from "./budget.js";
 import { refreshDevice, turnOff } from "./push.js";
 import { refreshInbox, showInbox } from "./inbox.js";
@@ -96,9 +97,21 @@ function route() {
     if (itemId) spotlightScheduled(decodeURIComponent(itemId));
     return;
   }
-  if (hash === "#notifications") { // the notification center, from the bell on the Add tab
+  // The notification center: from the bell on the Add tab (For me), or back to its Everything.
+  if (hash === "#notifications" || hash === "#notifications/everything") {
     showScreen("inbox", "add");
-    showInbox();
+    showInbox(hash.endsWith("/everything") ? "all" : "me");
+    return;
+  }
+  // From the activity log: Profile, on its Household section, or with Settings open.
+  if (hash === "#profile/household" || hash === "#profile/settings") {
+    const settings = hash.endsWith("/settings");
+    history.replaceState(null, "", "#profile");
+    if (settings) openSettings();
+    showScreen("profile");
+    showProfile();
+    const node = settings ? document.querySelector("#screen-profile .settings-card") : document.getElementById("household");
+    if (node) spotlight(node);
     return;
   }
   if (hash === "#settings") { // Settings now lives in Profile; old links and bookmarks land there
