@@ -202,6 +202,8 @@ export function recurringLabel(item) {
 // date, as in History) are the entry's, as actually logged. rate: EGP per USD, for the
 // "Upcoming in <month>" total.
 const data = { status: "idle", items: [], handled: new Map(), rate: null, message: "" };
+// Today's rate (EGP per USD), or null: also for the Budget tab's safe to spend in USD.
+export const rateNow = () => data.rate;
 const key = (itemId, due) => `${itemId}|${due}`;
 let loading = null;
 

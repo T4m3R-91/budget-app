@@ -563,6 +563,17 @@ a.btn { display: inline-block; text-decoration: none; }
 .bud-title { display: flex; align-items: baseline; gap: 8px; }
 .bud-title span { color: var(--muted); font-size: 12.5px; }
 .bud-empty { margin: 0; }
+/* This month's outlook, above Overall (budget.js): safe to spend a day, large; the forecast
+   beneath, red when it ends over budget. */
+.bud-outlook { margin: 2px 0 14px; }
+.bud-outlook .k { color: var(--muted); font-size: 12.5px; }
+.bud-outlook .v { font-size: 22px; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.bud-outlook .v small { font-size: 14px; font-weight: 600; color: var(--muted); }
+.bud-outlook .v .usd { margin-left: 8px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.bud-outlook .v.none { font-size: 16px; color: var(--expense); }
+.bud-outlook .v.none .why { font-weight: 500; }
+.bud-outlook .fc { margin-top: 2px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.bud-outlook .fc.over { color: var(--expense); font-weight: 600; }
 /* One bar: gray up to an even pace for today (this month only), the actual spending in blue on
    top, and the part beyond that pace in the over-budget red (all red once over budget). */
 .bud-bar { position: relative; height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
