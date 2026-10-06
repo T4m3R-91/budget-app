@@ -8,7 +8,7 @@ import { state, byId } from "./state.js";
 import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate } from "./ui.js";
 import { parseAmount } from "./numbers.js";
 import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate, notifyActivity } from "./db.js";
-import { paintRecurring, refreshRecurring, furthestDueMonth, scheduledFor } from "./recurring.js";
+import { paintRecurring, refreshRecurring, furthestDueMonth, scheduledFor, rateNow } from "./recurring.js";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const NOT_SET_UP = "Budgets aren't set up yet. Run budgets-migration.sql in Supabase to turn them on.";
@@ -245,6 +245,7 @@ function cardBody(month, now, data) {
   };
 
   return [
+    month === now ? outlookLines(outlook(total, used.egp, planned.egp), inUsd) : null,
     el("ul", { class: "bud-list" },
       row("Overall", used, planned, total, "overall"),
       lines.map((l) => row(l.label, l.spent, l.planned, l.budget))),
@@ -278,6 +279,52 @@ function bar(spent, budget, size = "", pace = null, planned = 0) {
 function paceToday() {
   const today = new Date();
   return today.getDate() / new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+}
+
+// ---------- this month's outlook: safe to spend, and where the month ends at this pace ----------
+// Over the categories with a budget, as the Overall bar. On 21 Oct (of 31 days), with a 45K budget,
+// 30K spent and 4K of scheduled payments still due:
+// - safe to spend: what's left after the scheduled payments, over the days left today included
+//   ("11 days left"): (45K − 30K − 4K) ÷ 11 = EGP 1,000 a day;
+// - the forecast: everything spent so far sets the pace (a straight line), over the days gone
+//   today included, for the days after today, plus the scheduled payments: 30K + 30K ÷ 21 × 10 +
+//   4K = 48.3K. Shown from the 7th: before, one big payment (Rent on the 1st) would make it soar.
+// { total, perDay, over, short, forecast, from }: perDay null when nothing's left, then over (already over
+// the budget by) or short (the scheduled payments would take it over by); forecast null before the
+// 7th, which `from` names.
+export function outlook(total, spent, scheduled, today = new Date()) {
+  const days = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const gone = today.getDate();
+  const left = days - gone + 1;
+  const remaining = total - spent - scheduled;
+  return {
+    total,
+    perDay: remaining > 0 ? remaining / left : null,
+    over: spent > total ? spent - total : 0,
+    short: spent <= total && remaining < 0 ? -remaining : 0,
+    forecast: gone >= 7 ? spent + (spent / gone) * (days - gone) + scheduled : null,
+    from: `7 ${MONTH_NAMES[today.getMonth()].slice(0, 3)}`,
+  };
+}
+
+// Two lines above Overall: "Safe to spend" / "EGP 1,000 / day" (in the USD view also ≈ USD, at
+// today's rate; budgets themselves are EGP), and "At this pace: EGP 48.3K of 45K (3.3K over)", red
+// when over.
+function outlookLines(o, inUsd) {
+  const rate = inUsd ? rateNow() : null;
+  const safe = o.perDay != null
+    ? el("div", { class: "v" }, egp(o.perDay), el("small", { text: " / day" }),
+        rate ? el("span", { class: "usd", text: `≈ ${fmtMoney(o.perDay / rate, "USD", { decimals: 0, code: true })}` }) : null)
+    : el("div", { class: "v none" }, "Nothing left",
+        o.over || o.short ? el("span", { class: "why", text: o.over ? ` · EGP ${compact(o.over)} over budget` : ` · EGP ${compact(o.short)} short for scheduled payments` }) : null);
+  let forecast;
+  if (o.forecast == null) forecast = el("div", { class: "fc", text: `Forecast from ${o.from}` });
+  else {
+    const diff = o.forecast - o.total;
+    const by = compact(Math.abs(diff)) === "0" ? "on budget" : `${compact(Math.abs(diff))} ${diff > 0 ? "over" : "under"}`;
+    forecast = el("div", { class: `fc${diff > 0 && by !== "on budget" ? " over" : ""}`, text: `At this pace: EGP ${compact(o.forecast)} of ${compact(o.total)} (${by})` });
+  }
+  return el("div", { class: "bud-outlook" }, el("div", { class: "k", text: "Safe to spend" }), safe, forecast);
 }
 
 function whenText(month, now) {
