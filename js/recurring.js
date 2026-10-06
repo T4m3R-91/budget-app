@@ -10,7 +10,7 @@ import { state, byId } from "./state.js";
 import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate, spotlight } from "./ui.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
-  fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, skipOccurrence, unskipOccurrence,
+  fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, continueRecurring, skipOccurrence, unskipOccurrence,
   fetchUnlinkedBetween, insertTransaction, deleteTransaction, latestEntryRate, notifyActivity,
 } from "./db.js";
 
@@ -122,9 +122,13 @@ export async function saveItemEdit(item, fields, date) {
     return { from, note, id: item.id };
   }
   const endOld = dayBefore(firstOf(from));
-  const created = await insertRecurring({ ...fields, starts_on: from, ended_on: "ended_on" in fields ? fields.ended_on : item.ended_on ?? null });
+  const ending = item.ended_on && item.ended_on < endOld ? item.ended_on : endOld;
+  const changes = { ...fields, starts_on: from, ended_on: "ended_on" in fields ? fields.ended_on : item.ended_on ?? null };
+  const id = await continueRecurring(item.id, ending, changes); // in one step (activity-log-migration.sql)
+  if (id) return { from, note, id };
+  const created = await insertRecurring(changes);
   try {
-    await updateRecurring(item.id, { ended_on: item.ended_on && item.ended_on < endOld ? item.ended_on : endOld });
+    await updateRecurring(item.id, { ended_on: ending });
   } catch (e) {
     await deleteRecurring(created.id).catch(() => {}); // don't leave both running
     throw e;
