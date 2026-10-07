@@ -27,6 +27,9 @@ const methodName = (r) => (r.type === "income"
   ? byId(state.receivingMethods || [], r.receiving_method_id)?.name
   : byId(state.paymentMethods, r.payment_method_id)?.name);
 const note = (s) => (s && s.length > 60 ? `${s.slice(0, 59)}…` : s);
+// Before the label of something private (private-migration.sql): "Mona added 🔒 🎁 Gifts".
+const lock = (r) => (r?.private_to ? "🔒 " : "");
+const privacyChange = (b, a) => ((b.private_to ?? null) === (a.private_to ?? null) ? null : a.private_to ? "made private" : "shared again");
 const changed = (b, a, key) => (b[key] ?? null) !== (a[key] ?? null);
 
 // Whether an owner can remove this line (the database's rule: the record of a deletion).
@@ -56,7 +59,7 @@ function entryLine(line, A, b, a, r) {
   const tone = r.type === "income" ? "income" : "expense";
   const details = (x) => [money(x), subName(x), note(x.description), relativeDay(x.occurred_on), x.who !== line.actor ? byWhom(x.who) : null];
   if (line.action === "deleted") {
-    return { icon: "🗑️", title: `${A} deleted ${labelOf(b)}`, body: details(b).filter(Boolean).join(" · "), tone, signed: true };
+    return { icon: "🗑️", title: `${A} deleted ${lock(b)}${labelOf(b)}`, body: details(b).filter(Boolean).join(" · "), tone, signed: true };
   }
   const href = `#history/${line.subject}`;
   if (line.action === "added") {
@@ -64,7 +67,7 @@ function entryLine(line, A, b, a, r) {
     const logged = a.recurring_id && !a.repeat;
     const extra = a.repeat ? `repeats ${a.repeat.frequency}`
       : logged && a.recurring_due_on && a.recurring_due_on !== a.occurred_on ? `due ${shortDate(a.recurring_due_on)}` : null;
-    return { icon: "➕", title: `${A} ${logged ? "logged" : "added"} ${labelOf(a)}`, body: [...details(a), extra].filter(Boolean).join(" · "), href, tone, signed: true };
+    return { icon: "➕", title: `${A} ${logged ? "logged" : "added"} ${lock(a)}${labelOf(a)}`, body: [...details(a), extra].filter(Boolean).join(" · "), href, tone, signed: true };
   }
   const amount = Number(b.amount) !== Number(a.amount) || b.currency !== a.currency;
   const parts = [
@@ -76,8 +79,9 @@ function entryLine(line, A, b, a, r) {
     changed(b, a, "payment_method_id") || changed(b, a, "receiving_method_id") ? `${methodName(b) || "no method"} → ${methodName(a) || "none"}` : null,
     changed(b, a, "who") ? `${byWhom(b.who)} → ${memberName(a.who) || "someone"}` : a.who !== line.actor ? byWhom(a.who) : null,
     changed(b, a, "recurring_id") ? (a.recurring_id ? "now a scheduled payment" : "no longer a scheduled payment") : null,
+    privacyChange(b, a),
   ];
-  return { icon: "✏️", title: `${A} edited ${labelOf(a)}`, body: parts.filter(Boolean).join(" · "), href, tone, signed: true };
+  return { icon: "✏️", title: `${A} edited ${lock(a)}${labelOf(a)}`, body: parts.filter(Boolean).join(" · "), href, tone, signed: true };
 }
 
 // "note added: …", "note removed: …", "old → new", or the note as it is.
@@ -108,7 +112,7 @@ function monthFor(r) {
 
 function scheduledLine(line, A, b, a, r) {
   const tone = r.type === "income" ? "income" : "expense";
-  const label = `${labelOf(r)} (scheduled)`;
+  const label = `${lock(r)}${labelOf(r)} (scheduled)`;
   const details = (x) => [money(x), subName(x), note(x.description)];
   if (line.action === "deleted") {
     return { icon: "🗑️", title: `${A} deleted ${label}`, body: [...details(b), scheduleOf(b)].filter(Boolean).join(" · "), tone, signed: true };
@@ -116,7 +120,7 @@ function scheduledLine(line, A, b, a, r) {
   const href = `#month/${monthFor(a)}/${line.subject}`;
   if (line.action === "added") {
     const when = a.frequency === "once" ? scheduleOf(a) : `${scheduleOf(a)} from ${shortDate(a.starts_on)}`;
-    return { icon: "🗓️", title: `${A} scheduled ${labelOf(a)}`, body: [...details(a), when].filter(Boolean).join(" · "), href, tone, signed: true };
+    return { icon: "🗓️", title: `${A} scheduled ${lock(a)}${labelOf(a)}`, body: [...details(a), when].filter(Boolean).join(" · "), href, tone, signed: true };
   }
   // Removed (an end date) or brought back (no end), nothing else changed.
   const onlyEnd = !a.continues && Object.keys({ ...a, ...b }).every((k) => ["ended_on", "updated_at", "updated_by"].includes(k) || !changed(b, a, k));
@@ -141,6 +145,7 @@ function scheduledLine(line, A, b, a, r) {
     changed(b, a, "payment_method_id") || changed(b, a, "receiving_method_id") ? `${methodName(b) || "no method"} → ${methodName(a) || "none"}` : null,
     changed(b, a, "who") ? `${byWhom(b.who)} → ${memberName(a.who) || "someone"}` : null,
     a.continues ? `from ${shortDate(a.starts_on)}` : !once && changed(b, a, "starts_on") ? `starts ${shortDate(b.starts_on)} → ${shortDate(a.starts_on)}` : null,
+    privacyChange(b, a),
   ];
   return { icon: "✏️", title: `${A} edited ${label}`, body: parts.filter(Boolean).join(" · "), href, tone, signed: true };
 }
@@ -151,7 +156,7 @@ function skipLine(line, A, r) {
   const body = [item ? money(item) : null, item ? note(item.description) : null, `due ${shortDate(r.due_on)}`].filter(Boolean).join(" · ");
   return {
     icon: line.action === "deleted" ? "↩️" : "⏭️",
-    title: `${A} ${line.action === "deleted" ? "unskipped" : "skipped"} ${item ? labelOf(item) : "a scheduled payment"}`,
+    title: `${A} ${line.action === "deleted" ? "unskipped" : "skipped"} ${item ? `${lock(item)}${labelOf(item)}` : "a scheduled payment"}`,
     body, href: `#month/${firstOf(r.due_on)}/${r.item_id}`, tone, signed: true,
   };
 }

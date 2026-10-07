@@ -4,7 +4,7 @@
 // recurring item itself (#recurring/…), and adds or edits a favorite (#fav/…). The ↻ strip on the
 // On tile makes a new entry repeat; the row of favorites above the amount fills the form in a tap.
 
-import { state, byId, subcategoriesOf, isActive } from "./state.js";
+import { state, byId, subcategoriesOf, isActive, isOwner } from "./state.js";
 import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
 import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
@@ -57,12 +57,14 @@ function rememberMethod(key, id) {
 function freshForm(type = "expense") {
   return {
     mode: "add", id: null, original: null,
+    me: state.me.email, // whose form it is
     type, amountText: "", currency: "EGP",
     rate: null, rateSource: null, rateNote: "", rateLoading: false, editingRate: false,
     rateFallback: false, // today's rate standing in for a past day's (see ensureRate)
     dayRate: null, // editing: { date, rate } of the entry's day, when it differs from the saved rate
     categoryId: null, subcategoryId: null, sourceId: null,
     paymentMethodId: rememberedPayment(), receivingMethodId: rememberedReceiving(), who: state.me.email,
+    private: false, // only the person it's By and owners see it (private-migration.sql)
     date: isoLocal(), description: "",
     saving: false, confirmDelete: false,
     repeat: null, repeatOpen: false, // null | "monthly" | "yearly" (| "once" for a scheduled item); repeatOpen shows its choices
@@ -79,7 +81,7 @@ function fromItem(item) {
     amountText: String(Number(item.amount)), currency: item.currency,
     categoryId: item.category_id, subcategoryId: item.subcategory_id, sourceId: item.income_source_id,
     paymentMethodId: item.payment_method_id, receivingMethodId: item.receiving_method_id ?? null,
-    who: item.who, description: item.description || "",
+    who: item.who, description: item.description || "", private: Boolean(item.private_to),
   };
 }
 
@@ -126,7 +128,8 @@ export function showAdd() {
     f = parked;
     parked = null;
   }
-  if (!f || f.mode !== "add") f = freshForm();
+  // ...but not someone else's: signed out and back in as another person on this phone.
+  if (!f || f.mode !== "add" || f.me !== state.me.email) f = freshForm();
   loadFavorites();
   if (f.date < isoLocal() && !f.amountText) f.date = isoLocal(); // stale "today" from yesterday
   render();
@@ -203,7 +206,7 @@ export async function showEdit(id) {
     rate: Number(t.rate), rateSource: "saved", rateNote: "saved",
     categoryId: t.category_id, subcategoryId: t.subcategory_id, sourceId: t.income_source_id,
     paymentMethodId: t.payment_method_id, receivingMethodId: t.receiving_method_id ?? null,
-    who: t.who, date: t.occurred_on, description: t.description || "",
+    who: t.who, date: t.occurred_on, description: t.description || "", private: Boolean(t.private_to),
   };
   render();
   checkDayRate();
@@ -614,8 +617,7 @@ function renderMeta() {
     label: m.email === state.me.email ? `${m.display_name} (you)` : isActive(m) ? m.display_name : `${m.display_name} (former)`,
   }));
   const tiles = f.mode === "fav" ? [fixedTile("By", `${state.me.display_name} (you)`), fixedTile("On", "Today")] : [
-    metaTile("By", people.find((p) => p.value === f.who)?.label ?? "—",
-      selectControl(income ? "Received by" : "Paid by", people, f.who, (v) => { f.who = v; renderMeta(); })),
+    byTile(people, income),
     onTile(),
   ];
   if (!income) {
@@ -625,6 +627,37 @@ function renderMeta() {
   }
   if (canRepeat() && f.repeatOpen) tiles.push(...repeatChoices().filter(Boolean));
   $("e-meta").replaceChildren(...tiles);
+}
+
+// By: who paid (or received). Its right 25% is 🔒 Private (private-migration.sql): only the person
+// it's By and the household's owners see it, and By stays as it is while it's on (a new entry
+// becomes yours). Making someone else's entry private is for owners: anyone else would lose sight
+// of it. One logged from a scheduled payment is as private as the payment: the 🔒 shows that but
+// doesn't change it.
+function byTile(people, income) {
+  const follows = Boolean(f.recurring || f.original?.recurring_id);
+  const canLock = !follows && (f.mode === "add" || f.who === state.me.email || isOwner());
+  const showLock = canLock || f.private;
+  return el("label", { class: `meta-tile${showLock ? " has-lock" : ""}${f.private ? " is-private" : ""}` },
+    el("span", { class: "on-text" },
+      el("span", { class: "k", text: "By" }),
+      // "You" (not "Tamer (you)"): the 🔒 leaves room for a short name only.
+      el("span", { class: "v", text: f.who === state.me.email ? "You" : people.find((p) => p.value === f.who)?.label ?? "—" }),
+      f.private ? el("span", { class: "r", text: "Private" }) : null),
+    f.private ? null : selectControl(income ? "Received by" : "Paid by", people, f.who, (v) => { f.who = v; renderMeta(); }),
+    showLock
+      ? el("button", {
+          type: "button", class: `lock-btn${f.private ? " on" : ""}`, "aria-pressed": String(f.private), disabled: !canLock,
+          "aria-label": f.private ? "Private: only the person it's By and owners see it. Tap to share it" : "Make it private",
+          onclick: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            f.private = !f.private;
+            if (f.private && f.mode === "add") f.who = state.me.email;
+            renderMeta();
+          },
+        }, "🔒")
+      : null);
 }
 
 // A new entry can be set to repeat, and a recurring item's schedule edited; not while editing an
@@ -822,6 +855,9 @@ async function save_() {
     ...(state.receivingMethods ? { receiving_method_id: expense ? null : form.receivingMethodId } : {}),
     who: form.who,
     description: form.description.trim() || null,
+    // Private to whoever it's By. Sent only when it is or was private, so entries save as before
+    // until private-migration.sql has run.
+    ...(form.private || form.original?.private_to || form.item?.private_to ? { private_to: form.private ? form.who : null } : {}),
   };
 
   // A recurring item's schedule, from the entry's date: monthly on its day, or yearly on its date.
