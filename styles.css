@@ -373,9 +373,18 @@ a.btn { display: inline-block; text-decoration: none; }
 .meta-tile .r { color: var(--accent); font-size: 11px; line-height: 1.2; }
 .income-mode .meta-tile .r { color: var(--income); }
 .repeat-seg { grid-column: 1 / -1; display: flex; }
-/* Tags (tags.js): an @tag in a note stands out; typing one lists the household's under the note. */
+/* Tags (tags.js): an @tag in a note stands out. Typing one lists the household's just above the
+   note, over the details (on a phone the keyboard hides whatever is below the note); below it only
+   when the note is at the top of the screen. */
 .tag { color: var(--accent); font-weight: 600; }
-.tag-suggest { margin-top: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.note-wrap { position: relative; margin-top: 10px; }
+.note-wrap .note-input { margin-top: 0; }
+.tag-suggest {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 20;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.22);
+}
+.tag-suggest.below { bottom: auto; top: calc(100% + 6px); }
 .tag-option {
   display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%;
   padding: 11px 14px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--text);

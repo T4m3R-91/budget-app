@@ -380,15 +380,16 @@ function render() {
     amountRow,
     el("div", { id: "e-grid", class: "cat-grid", role: "group", "aria-label": income ? "Source" : "Category" }),
     el("div", { id: "e-meta", class: "meta-grid" }),
-    el("textarea", {
-      id: "e-desc", class: "text-input note-input", rows: 1, maxlength: 200,
-      placeholder: income ? "Note (optional)" : "Note (optional), e.g. Negmet Heliopolis",
-      "aria-label": "Note", value: f.description,
-      oninput: (e) => { f.description = e.target.value; fitNote(); suggestFav(); paintTagSuggest(); },
-      onkeyup: paintTagSuggest, onclick: paintTagSuggest, // the caret moved
-      onblur: () => setTimeout(paintTagSuggest, 150),
-    }),
-    el("div", { id: "e-tag-suggest", class: "tag-suggest", hidden: true, "aria-label": "Tags" }),
+    el("div", { class: "note-wrap" },
+      el("textarea", {
+        id: "e-desc", class: "text-input note-input", rows: 1, maxlength: 200,
+        placeholder: income ? "Note (optional)" : "Note (optional), e.g. Negmet Heliopolis",
+        "aria-label": "Note", value: f.description,
+        oninput: (e) => { f.description = e.target.value; fitNote(); suggestFav(); paintTagSuggest(); },
+        onkeyup: paintTagSuggest, onclick: paintTagSuggest, // the caret moved
+        onblur: () => setTimeout(paintTagSuggest, 150),
+      }),
+      el("div", { id: "e-tag-suggest", class: "tag-suggest", hidden: true, "aria-label": "Tags" })),
     el("div", { class: "action-bar" }, actions),
   ].filter(Boolean));
 
@@ -439,6 +440,12 @@ async function paintTagSuggest() {
     onpointerdown: (e) => e.preventDefault(), // keep the keyboard up
     onclick: () => pickTag(t.name),
   }, el("span", { class: "tag", text: `@${t.name}` }), el("span", { class: "uses", text: `${t.uses} ${t.uses === 1 ? "use" : "uses"}` }))));
+  if (box.hidden) return;
+  // Above the note, over the details: on a phone the keyboard covers everything below the note
+  // (only the note itself is kept above it). Below the note only when there's no room above it
+  // in what's on screen (the note scrolled to the top).
+  const visibleTop = window.visualViewport?.offsetTop ?? 0;
+  box.classList.toggle("below", note.getBoundingClientRect().top - visibleTop < box.offsetHeight + 12);
 }
 
 // Puts the whole tag (and a space) in place of what's typed of it.
