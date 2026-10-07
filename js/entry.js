@@ -10,14 +10,15 @@ import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
-  insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction,
+  insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction, fetchAllTransactions,
   insertRecurring, deleteRecurring, linkToRecurring, notifyActivity, beforeOf,
   fetchFavorites, insertFavorite, updateFavorite, deleteFavorite, useFavorite,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
 import { monthStatus, monthOf, budgetMonth, openBudgetOn, compact } from "./budget.js";
-import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, handledStatus, scheduledFor, ordinal, shortDate } from "./recurring.js";
+import { refreshRecurring, recurringItem, recurringLabel, firstOpenDue, saveItemEdit, handledStatus, scheduledFor, ordinal, shortDate, scheduledItems } from "./recurring.js";
 import { bell } from "./inbox.js";
+import { tagList, typingTag, suggestTags } from "./tags.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -383,8 +384,11 @@ function render() {
       id: "e-desc", class: "text-input note-input", rows: 1, maxlength: 200,
       placeholder: income ? "Note (optional)" : "Note (optional), e.g. Negmet Heliopolis",
       "aria-label": "Note", value: f.description,
-      oninput: (e) => { f.description = e.target.value; fitNote(); suggestFav(); },
+      oninput: (e) => { f.description = e.target.value; fitNote(); suggestFav(); paintTagSuggest(); },
+      onkeyup: paintTagSuggest, onclick: paintTagSuggest, // the caret moved
+      onblur: () => setTimeout(paintTagSuggest, 150),
     }),
+    el("div", { id: "e-tag-suggest", class: "tag-suggest", hidden: true, "aria-label": "Tags" }),
     el("div", { class: "action-bar" }, actions),
   ].filter(Boolean));
 
@@ -403,6 +407,57 @@ function render() {
 function fitAmount() {
   const fit = $("e-amount-fit");
   if (fit) fit.dataset.value = f.amountText || "0";
+}
+
+// ---------- tags in the note (tags.js) ----------
+// Typing "@" in the note lists the household's tags under it (those in the notes of entries and
+// scheduled payments you can see), with how many use each, narrowing as you type. Tapping one
+// finishes it. The list is gathered once a minute at most, and again after a save.
+
+let tagCache = null; // { at, me, list }: whose it is too, as private entries' tags are only theirs
+
+async function householdTags() {
+  const me = state.me.email;
+  if (tagCache?.me === me && Date.now() - tagCache.at < 60000) return tagCache.list;
+  const entries = await fetchAllTransactions().catch(() => []);
+  tagCache = { at: Date.now(), me, list: tagList([...entries, ...scheduledItems()]) };
+  return tagCache.list;
+}
+
+async function paintTagSuggest() {
+  const note = $("e-desc");
+  const box = $("e-tag-suggest");
+  if (!note || !box) return;
+  const typing = document.activeElement === note ? typingTag(note.value, note.selectionStart ?? note.value.length) : null;
+  if (!typing) { box.hidden = true; return; }
+  const list = await householdTags();
+  if (note !== $("e-desc") || document.activeElement !== note) return; // moved on meanwhile
+  const matches = suggestTags(list, typing.query);
+  box.hidden = !matches.length;
+  box.replaceChildren(...matches.map((t) => el("button", {
+    type: "button", class: "tag-option",
+    onpointerdown: (e) => e.preventDefault(), // keep the keyboard up
+    onclick: () => pickTag(t.name),
+  }, el("span", { class: "tag", text: `@${t.name}` }), el("span", { class: "uses", text: `${t.uses} ${t.uses === 1 ? "use" : "uses"}` }))));
+}
+
+// Puts the whole tag (and a space) in place of what's typed of it.
+function pickTag(name) {
+  const note = $("e-desc");
+  const caret = note.selectionStart ?? note.value.length;
+  const typing = typingTag(note.value, caret);
+  if (!typing) return;
+  const rest = note.value.slice(caret).match(/^[\p{L}\p{M}\p{N}_-]*/u)[0]; // the tag's end, if the caret was inside it
+  const after = note.value.slice(caret + rest.length).replace(/^ /, "");
+  const value = `${note.value.slice(0, typing.start)}@${name} ${after}`.slice(0, 200);
+  note.value = value;
+  f.description = value;
+  const at = Math.min(value.length, typing.start + name.length + 2);
+  note.focus();
+  note.setSelectionRange(at, at);
+  fitNote();
+  suggestFav();
+  paintTagSuggest();
 }
 
 // The note is one line and grows with what's typed.
@@ -873,6 +928,7 @@ async function save_() {
   const untilNote = form.until && (form.repeat === "monthly" || form.repeat === "yearly") ? ` until ${dayMonthYear(form.until)}` : "";
 
   form.saving = true;
+  tagCache = null; // its note may bring a new tag
   renderSaveButton();
   try {
     if (form.mode === "edit") {

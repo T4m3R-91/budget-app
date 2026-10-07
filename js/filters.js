@@ -1,15 +1,17 @@
-// The one filter bar (search, Category, Who, Payment, Dates, Clear), shared by the Dashboard and
-// History: a single set of settings and a single bar, moved into whichever of the two is on
+// The one filter bar (search, Category, Who, Payment, Tag, Dates, Clear), shared by the Dashboard
+// and History: a single set of settings and a single bar, moved into whichever of the two is on
 // screen, so a change made in either shows in both. Both apply it through matchesFilters().
 
 import { state, byId, isActive } from "./state.js";
 import { el, friendlyError, loadScript, loadStyle, toast, isoLocal, parseISODate } from "./ui.js";
+import { tagList, tagKeys } from "./tags.js";
 
 export const FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js";
 export const FLATPICKR_CSS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export const filters = { search: "", categories: new Set(), who: new Set(), payments: new Set(), from: "", to: "" };
+// tags: tag keys (tags.js); an entry passes with any of them in its note.
+export const filters = { search: "", categories: new Set(), who: new Set(), payments: new Set(), tags: new Set(), from: "", to: "" };
 
 const listeners = new Set();
 export const onFiltersChange = (fn) => listeners.add(fn);
@@ -17,7 +19,7 @@ const changed = () => listeners.forEach((fn) => fn());
 
 let bar = null; // built once, then moved between the two screens
 let picker = null; // the date-range calendar, created the first time Dates is opened
-let used = { categories: new Set(), who: new Set(), payments: new Set() };
+let used = { categories: new Set(), who: new Set(), payments: new Set(), tags: [] };
 
 // Puts the bar into a screen. It's the same element every time, so nothing resets on the way.
 export function mountFilterBar(slot) {
@@ -31,6 +33,7 @@ export function setFilterOptions(rows) {
     categories: new Set(rows.map((t) => t.category_id).filter(Boolean)),
     who: new Set(rows.map((t) => t.who).filter(Boolean)),
     payments: new Set(rows.map((t) => t.payment_method_id).filter(Boolean)),
+    tags: tagList(rows), // most used first
   };
   if (bar) buildMenus();
 }
@@ -43,6 +46,10 @@ export function matchesFilters(t) {
   if (f.who.size && !f.who.has(t.who)) return false;
   if (f.categories.size && !f.categories.has(t.category_id)) return false;
   if (f.payments.size && !f.payments.has(t.payment_method_id)) return false;
+  if (f.tags.size) {
+    const own = tagKeys(t.description);
+    if (![...f.tags].some((k) => own.has(k))) return false;
+  }
   const q = f.search.trim().toLowerCase();
   return !q || searchText(t).includes(q);
 }
@@ -68,6 +75,7 @@ function buildBar() {
       el("div", { class: "ms-wrap", id: "f-ms-cat" }),
       el("div", { class: "ms-wrap", id: "f-ms-who" }),
       el("div", { class: "ms-wrap", id: "f-ms-pay" }),
+      el("div", { class: "ms-wrap", id: "f-ms-tag" }),
       dateFilter(),
       el("button", { type: "button", class: "btn primary small clear-filters", "aria-label": "Clear filters", title: "Clear filters", onclick: clearFilters },
         trashIcon())));
@@ -96,6 +104,7 @@ export function clearFilters() {
   filters.categories.clear();
   filters.who.clear();
   filters.payments.clear();
+  filters.tags.clear();
   bar.querySelector("#f-search").value = "";
   clearDates();
   buildMenus();
@@ -150,6 +159,9 @@ function buildMenus() {
   multiSelect(bar.querySelector("#f-ms-pay"), "Payment",
     offer(state.paymentMethods, "payments", filters.payments).map((p) => ({ value: p.id, label: p.name })),
     filters.payments);
+  // Tags in use, most used first; one chosen but no longer in any note stays listed too.
+  const tags = [...used.tags, ...[...filters.tags].filter((k) => !used.tags.some((t) => t.key === k)).map((k) => ({ key: k, name: k }))];
+  multiSelect(bar.querySelector("#f-ms-tag"), "Tag", tags.map((t) => ({ value: t.key, label: `@${t.name}` })), filters.tags);
 }
 
 // ---------- dates: one button, a calendar where you tap a start day then an end day ----------
