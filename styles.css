@@ -373,6 +373,16 @@ a.btn { display: inline-block; text-decoration: none; }
 .meta-tile .r { color: var(--accent); font-size: 11px; line-height: 1.2; }
 .income-mode .meta-tile .r { color: var(--income); }
 .repeat-seg { grid-column: 1 / -1; display: flex; }
+/* Tags (tags.js): an @tag in a note stands out; typing one lists the household's under the note. */
+.tag { color: var(--accent); font-weight: 600; }
+.tag-suggest { margin-top: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.tag-option {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%;
+  padding: 11px 14px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--text);
+  font-size: 15px; text-align: left;
+}
+.tag-option:first-child { border-top: 0; }
+.tag-option .uses { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
 .repeat-seg button { flex: 1; padding-left: 6px; padding-right: 6px; }
 /* Until: the repeat's last date (included), picked from a calendar; clearing it there means no end. */
 .until-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }

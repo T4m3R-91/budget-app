@@ -7,6 +7,7 @@ import { el, fmtMoney, friendlyDate, friendlyError, toast, parseISODate, spotlig
 import { fetchAllTransactions } from "./db.js";
 import { itemRepeats } from "./recurring.js";
 import { mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange, clearFilters } from "./filters.js";
+import { withTags } from "./tags.js";
 import { pendingEntries, removePending } from "./outbox.js";
 
 const PAGE = 50;
@@ -170,20 +171,20 @@ function plainDate(iso) {
 function row(t) {
   const income = t.type === "income";
   const kind = income ? byId(state.incomeSources, t.income_source_id) : byId(state.categories, t.category_id);
-  const detail = [byId(state.subcategories, t.subcategory_id)?.name, t.description, memberName(t.who)]
-    .filter(Boolean)
-    .join(" · ");
+  // The note's @tags stand out (tags.js).
+  const bits = [byId(state.subcategories, t.subcategory_id)?.name, t.description ? withTags(t.description) : null, memberName(t.who)].filter(Boolean);
+  const detail = bits.flatMap((b, i) => [...(i ? [" · "] : []), ...[].concat(b)]);
   const other = t.currency === "USD" ? fmtMoney(t.amount_egp, "EGP") : fmtMoney(t.amount_usd, "USD", { code: true });
   // Logged from a recurring item: which due date it settles ("↻ Due 1 Oct"), so a payment made in
   // another month still shows the month it belongs to. It's kept whole; the details before it
   // are shortened instead when the line is too long.
   // (No ↻ for a payment scheduled just once.)
-  const due = t.recurring_due_on ? `${detail ? "· " : ""}${itemRepeats(t.recurring_id) ? "↻ " : ""}Due ${plainDate(t.recurring_due_on)}` : null;
+  const due = t.recurring_due_on ? `${bits.length ? "· " : ""}${itemRepeats(t.recurring_id) ? "↻ " : ""}Due ${plainDate(t.recurring_due_on)}` : null;
   return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}`, "data-id": t.id },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: `${t.private_to ? "🔒 " : ""}${kind?.name || "Unknown"}` }), // private: only its person and owners see it
-      el("span", { class: "txn-sub" }, el("span", { class: "txn-detail", text: detail }), due ? el("span", { class: "txn-due", text: due }) : null)),
+      el("span", { class: "txn-sub" }, el("span", { class: "txn-detail" }, ...detail), due ? el("span", { class: "txn-due", text: due }) : null)),
     el("span", { class: "txn-amt" },
       (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
       el("span", { class: "alt", text: `≈ ${other}` })));

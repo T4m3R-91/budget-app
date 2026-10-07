@@ -3,15 +3,18 @@
 import { state, byId, memberName } from "./state.js";
 import { loadScript, isoLocal } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
+import { tagsIn } from "./tags.js";
 
 const SHEETJS = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const RATE = "Rate at Entry (EGP per USD)";
 const MONEY_COLUMNS = new Set(["Amount", "Amount_EGP", "Amount_USD"]);
 
+// Tags (the note's @words, tags.js) come last, so the older columns keep their places.
 const TX_HEADERS = ["Date", "Category", "Subcategory", "Description", "Amount", "Currency", "Amount_EGP",
-  "Amount_USD", "Who Paid", "Payment Method", "Month", "Year", RATE];
-const INCOME_HEADERS = ["Date", "Source", "Amount", "Currency", "Amount_EGP", "Amount_USD", "Who", "Received In", "Month", "Year", RATE];
+  "Amount_USD", "Who Paid", "Payment Method", "Month", "Year", RATE, "Tags"];
+const INCOME_HEADERS = ["Date", "Source", "Amount", "Currency", "Amount_EGP", "Amount_USD", "Who", "Received In", "Month", "Year", RATE, "Tags"];
+const tagsOf = (t) => [...new Map(tagsIn(t.description).map((x) => [x.key, x.name])).values()].join(", ");
 
 // Excel serial day number, computed in UTC so no time zone can shift the date.
 function excelDate(iso) {
@@ -53,6 +56,7 @@ export async function exportToExcel() {
     byId(state.paymentMethods, t.payment_method_id)?.name ?? "",
     ...monthYear(t.occurred_on),
     Number(t.rate),
+    tagsOf(t),
   ]);
 
   const income = rows.filter((t) => t.type === "income").map((t) => [
@@ -63,6 +67,7 @@ export async function exportToExcel() {
     byId(state.receivingMethods ?? [], t.receiving_method_id)?.name ?? "", // the Add screen's "In"
     ...monthYear(t.occurred_on),
     Number(t.rate),
+    tagsOf(t),
   ]);
 
   const wb = XLSX.utils.book_new();

@@ -204,6 +204,8 @@ export function recurringLabel(item) {
 const data = { status: "idle", items: [], handled: new Map(), rate: null, message: "" };
 // Today's rate (EGP per USD), or null: also for the Budget tab's safe to spend in USD.
 export const rateNow = () => data.rate;
+// The scheduled payments as loaded (their notes' tags count as the household's too; tags.js).
+export const scheduledItems = () => (data.status === "ready" ? data.items : []);
 const key = (itemId, due) => `${itemId}|${due}`;
 let loading = null;
 
