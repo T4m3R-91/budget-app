@@ -8,6 +8,7 @@ import { el, toast, friendlyError, friendlyDate, isoLocal } from "./ui.js";
 import {
   sb, reloadLists, fetchLeaderboard, fetchNotifySettings, saveNotifySettings, fetchBackupStatus,
   inviteMember, cancelInvite, setMemberRole, setMemberActive, renameMe,
+  fetchQuickAdd, quickAddOn, quickAddOff, quickAddLink,
 } from "./db.js";
 import { settingsCard } from "./settings.js";
 import { exportToExcel } from "./export.js";
@@ -33,6 +34,7 @@ export function showProfile() {
   loadBoard();
   paintPush();
   loadPrefs();
+  loadQuick();
   prepareKey();
   if (!version) appVersion().then((v) => {
     version = v;
@@ -268,7 +270,95 @@ function prefRows() {
         text: prefs.partner_activity ? "When partner(s) add or change an entry, a scheduled payment or a budget." : "Off. Nothing is sent when partner(s) add or change things.",
       }),
       switchEl(prefs.partner_activity, "Partner activity", () => setPref({ partner_activity: !prefs.partner_activity }))),
+    ...quickRows(),
   ];
+}
+
+// ---------- Apple Pay quick-add (apple_pay-quick-add-migration.sql) ----------
+// On an iPhone, each Apple Pay payment can bring a "tap to save it" notification that opens the
+// Add form filled in. It goes through a Shortcuts automation set up once by hand (Apple lets no
+// app set one up itself): turning this on makes your own link for it and shows the steps, until
+// your first payment has come through. Off: the steps go, and the link stops working (on again
+// makes a new one).
+
+let quick = { status: "loading" }; // loading | ready | missing | error; ready: row (null = off), busy
+
+async function loadQuick() {
+  try {
+    const row = await fetchQuickAdd();
+    quick = row === "missing" ? { status: "missing" } : { status: "ready", row };
+  } catch (e) {
+    quick = { status: "error", message: friendlyError(e) };
+  }
+  paintPush();
+}
+
+async function flipQuick() {
+  if (!navigator.onLine) return toast("Changing this needs a connection.");
+  const wasOn = Boolean(quick.row);
+  quick = { ...quick, busy: true };
+  paintPush();
+  try {
+    if (wasOn) await quickAddOff();
+    else await quickAddOn();
+    quick = { status: "ready", row: await fetchQuickAdd() };
+    if (!wasOn) toast("Now the one-time setup, below, on your iPhone.");
+  } catch (e) {
+    quick = { ...quick, busy: false };
+    toast(friendlyError(e));
+  }
+  paintPush();
+}
+
+// "today, 2:14 PM" / "3 Oct, 9:05 AM"
+const atTime = (iso) => {
+  const d = new Date(iso);
+  return `${friendlyDate(isoLocal(d)).replace(/^(Today|Yesterday)$/, (w) => w.toLowerCase())}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+};
+
+// Shown once apple_pay-quick-add-migration.sql has run (and its state could be read).
+function quickRows() {
+  if (quick.status !== "ready") return [];
+  const row = quick.row;
+  const line = !row ? "Off. On iPhone, get a “tap to save it” notification after each Apple Pay payment. Needs a one-time setup."
+    : row.first_payment_at ? `On. Last Apple Pay payment: ${atTime(row.last_payment_at)}.`
+    : "On. Finish the one-time setup below; it takes about 2 minutes.";
+  const toggle = pushRow("Apple Pay quick-add", el("span", { class: "muted small", text: line }),
+    switchEl(Boolean(row), "Apple Pay quick-add", flipQuick, Boolean(quick.busy)));
+  return row && !row.first_payment_at ? [toggle, setupSteps(quickAddLink(row.key))] : [toggle];
+}
+
+async function copyLink(link) {
+  try {
+    await navigator.clipboard.writeText(link);
+    toast("Link copied. Paste it in step 5.");
+  } catch {
+    toast("Couldn't copy it. Press and hold the link below to copy it.");
+  }
+}
+
+// The steps, in the words the Shortcuts app uses.
+function setupSteps(link) {
+  const li = (...parts) => el("li", {}, ...parts);
+  const b = (text) => el("strong", { text });
+  return el("div", { class: "quick-setup" },
+    el("p", { class: "quick-head", text: "One-time setup on your iPhone (iOS 17 or later)" }),
+    el("ol", {},
+      li("Copy your link. ", el("button", { type: "button", class: "btn secondary small", text: "Copy link", onclick: () => copyLink(link) }),
+        el("span", { class: "quick-link", text: link }),
+        el("span", { class: "muted", text: "It's only yours: don't share it." })),
+      li("Open the ", b("Shortcuts"), " app, go to ", b("Automation"), ", tap ", b("+"), " and choose ", b("Transaction"), "."),
+      li("Leave your cards selected, choose ", b("Run Immediately"), ", then tap ", b("Next"), "."),
+      li("Tap ", b("New Blank Automation"), ", then ", b("Add Action"), ", and pick ", b("Get Contents of URL"), "."),
+      li("Tap ", b("URL"), " and paste your link."),
+      li("Tap ", b("›"), " to show more. Set ", b("Method"), " to ", b("POST"), " and ", b("Request Body"), " to ", b("JSON"),
+        ", then add three ", b("Text"), " fields:",
+        el("ul", {},
+          li(b("amount"), ": tap its value, choose ", b("Shortcut Input"), ", then ", b("Amount")),
+          li(b("merchant"), ": ", b("Shortcut Input"), ", then ", b("Merchant")),
+          li(b("card"), ": ", b("Shortcut Input"), ", then ", b("Card"), " (it may say Card or Pass)"))),
+      li("Tap ", b("Done"), ".")),
+    el("p", { class: "muted small", text: "Then pay once with Apple Pay. A “tap to save it” notification arrives (notifications must be on for this iPhone, at the top of this section), and these steps go away." }));
 }
 
 function flipPush(wasOn) {

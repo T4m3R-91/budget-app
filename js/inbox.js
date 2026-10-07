@@ -166,11 +166,11 @@ function bodyText(body, signed = true) {
 }
 
 // One notification as one of History's cards (its shape, icon tile and red or green), with its own
-// text: ⏰ for a reminder, 👤 for partner activity, the title, the text under it, and the time at
-// the right, after a dot while it's new.
+// text: ⏰ for a reminder, 💳 for an Apple Pay payment to save, 👤 for partner activity, the
+// title, the text under it, and the time at the right, after a dot while it's new.
 function card(n) {
   return el("a", { class: `txn-row inbox-card ${isIncome(n) ? "income" : "expense"}`, href: target(n.url) },
-    el("span", { class: "txn-ico", "aria-hidden": "true", text: n.kind === "reminder" ? "⏰" : "👤" }),
+    el("span", { class: "txn-ico", "aria-hidden": "true", text: n.kind === "reminder" ? "⏰" : n.kind === "payment" ? "💳" : "👤" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title", text: n.title }),
       n.body ? bodyText(n.body, !aboutBudget(n)) : null),

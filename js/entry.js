@@ -122,6 +122,53 @@ export async function showRecurringEdit(itemId) {
   render();
 }
 
+// #quick?a=450&c=EGP&m=Carrefour&card=CIB Visa: an Apple Pay payment's "tap to save it" (the
+// notify function's capture). A new entry, filled in, to check and save: the amount (another
+// currency, "raw", goes in the note to fill in by hand), the merchant as the note, and the category,
+// subcategory and payment method of your last entry with that merchant (so changing them once
+// teaches it), or else a payment method named like the card ("Credit Card" for a credit card).
+export async function showQuick(params) {
+  const amount = Number(params.get("a"));
+  const merchant = params.get("m") || "";
+  const card = params.get("card") || "";
+  const raw = params.get("raw");
+  f = {
+    ...freshForm("expense"),
+    amountText: amount > 0 ? String(amount) : "",
+    currency: params.get("c") === "USD" ? "USD" : "EGP",
+    description: [merchant, raw ? `(${raw})` : null].filter(Boolean).join(" ").slice(0, 200),
+  };
+  const form = f;
+  render();
+  ensureRate();
+  loadBudgetTiles();
+  toast(`From Apple Pay${card ? ` · ${card}` : ""}. Check it, then Save.`);
+  const entries = await fetchAllTransactions().catch(() => []);
+  if (f !== form || form.categoryId) return; // moved on, or already picked
+  const last = merchant && entries.find((t) => t.type === "expense" && sameMerchant(t.description, merchant));
+  if (last) {
+    Object.assign(form, { categoryId: last.category_id, subcategoryId: last.subcategory_id, paymentMethodId: last.payment_method_id ?? form.paymentMethodId });
+  } else if (card) {
+    form.paymentMethodId = methodForCard(card) ?? form.paymentMethodId;
+  }
+  render();
+}
+
+// "Carrefour Heliopolis @dahab-trip" is the same merchant as "Carrefour Heliopolis", and so is a
+// note that was just "Carrefour".
+function sameMerchant(note, merchant) {
+  const n = (note || "").replace(/\s@.*$/u, "").trim().toLocaleLowerCase();
+  const m = merchant.toLocaleLowerCase();
+  return Boolean(n) && (n.startsWith(m) || (n.length >= 3 && m.startsWith(n)));
+}
+
+// A payment method named like the card: "Credit Card" for "CIB Visa Credit", "Debit Card" for a debit
+// or Meeza card.
+function methodForCard(card) {
+  const kind = /credit/i.test(card) ? /credit/i : /debit|meeza|prepaid/i.test(card) ? /debit/i : null;
+  return kind ? state.paymentMethods.find((m) => !m.hidden && kind.test(m.name))?.id ?? null : null;
+}
+
 export function showAdd() {
   // Keep a half-filled entry when hopping between tabs (or opening a favorite's form); start
   // fresh after an edit.

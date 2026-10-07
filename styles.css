@@ -377,6 +377,14 @@ a.btn { display: inline-block; text-decoration: none; }
    note, over the details, always: on a phone the keyboard hides whatever is below the note, and the
    form always has room above it. */
 .tag { color: var(--accent); font-weight: 600; }
+/* Profile → Notifications → Apple Pay quick-add: the one-time setup steps, until the first payment. */
+.quick-setup { margin: 4px 0 12px; padding: 12px 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 13.5px; line-height: 1.5; }
+.quick-setup .quick-head { margin: 0 0 6px; font-weight: 600; }
+.quick-setup ol { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 6px; }
+.quick-setup ul { margin: 4px 0 0; padding-left: 16px; }
+.quick-setup li .btn { margin: 4px 6px 2px 0; }
+.quick-link { display: block; margin: 4px 0 2px; color: var(--muted); font-size: 11.5px; word-break: break-all; user-select: all; -webkit-user-select: all; }
+.quick-setup > p:last-child { margin: 0; }
 .note-wrap { position: relative; margin-top: 10px; }
 .note-wrap .note-input { margin-top: 0; }
 .tag-suggest {
