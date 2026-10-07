@@ -347,7 +347,7 @@ function setupSteps(link) {
       li("Copy your link. ", el("button", { type: "button", class: "btn secondary small", text: "Copy link", onclick: () => copyLink(link) }),
         el("span", { class: "quick-link", text: link }),
         el("span", { class: "muted", text: "It's only yours: don't share it." })),
-      li("Open the ", b("Shortcuts"), " app, go to ", b("Automation"), ", tap ", b("+"), " and choose ", b("Transaction"), "."),
+      li("Open the ", b("Shortcuts"), " app, go to ", b("Automation"), ", tap ", b("+"), " and choose ", b("Wallet"), "."),
       li("Leave your cards selected, choose ", b("Run Immediately"), ", then tap ", b("Next"), "."),
       li("Tap ", b("New Blank Automation"), ", then ", b("Add Action"), ", and pick ", b("Get Contents of URL"), "."),
       li("Tap ", b("URL"), " and paste your link."),
@@ -358,7 +358,7 @@ function setupSteps(link) {
           li(b("merchant"), ": ", b("Shortcut Input"), ", then ", b("Merchant")),
           li(b("card"), ": ", b("Shortcut Input"), ", then ", b("Card"), " (it may say Card or Pass)"))),
       li("Tap ", b("Done"), ".")),
-    el("p", { class: "muted small", text: "Then pay once with Apple Pay in a shop. A “tap to save it” notification arrives (notifications must be on for this iPhone, at the top of this section), and these steps go away. Running the automation by hand in Shortcuts sends no payment, so it only says “Your link works”." }));
+    el("p", { class: "muted small", text: "Then pay once with Apple Pay in a shop. A “tap to save it” notification arrives (notifications must be on for this iPhone, at the top of this section), and these steps go away. Running the automation by hand in Shortcuts sends no payment: you get a test notification instead." }));
 }
 
 function flipPush(wasOn) {
