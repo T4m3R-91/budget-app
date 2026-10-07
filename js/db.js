@@ -288,6 +288,31 @@ export async function markInboxRead() {
   unwrap(await sb.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null));
 }
 
+// ---------- Apple Pay quick-add (apple_pay-quick-add-migration.sql) ----------
+
+// Yours: { key, first_payment_at, last_payment_at }; null while it's off; "missing" until the
+// migration has run.
+export function fetchQuickAdd() {
+  return cached(`quick-add:${state.me?.email}`, async () => {
+    const { data, error } = await sb.from("quick_add").select("key, first_payment_at, last_payment_at").maybeSingle();
+    if (isMissingTable(error)) return "missing";
+    return unwrap({ data, error });
+  });
+}
+
+export async function quickAddOn() {
+  const { error } = await sb.rpc("quick_add_on");
+  if (error?.code === "PGRST202") throw new Error("Apple Pay quick-add isn't set up yet. Run apple_pay-quick-add-migration.sql in Supabase.");
+  if (error) throw error;
+}
+
+export async function quickAddOff() {
+  unwrap(await sb.rpc("quick_add_off"));
+}
+
+// Where your iPhone's automation sends each payment: the notify function, with your own key.
+export const quickAddLink = (key) => `${SUPABASE_URL}/functions/v1/notify?capture=${key}`;
+
 // ---------- the activity log (activity-log-migration.sql) ----------
 
 // A page of the household's activity log, newest first: LOG_PAGE lines from offset, or null until

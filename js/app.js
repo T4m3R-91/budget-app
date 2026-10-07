@@ -6,7 +6,7 @@ import { configured, sb, reloadLists, myMembership, markJoined } from "./db.js";
 import { state, isActive } from "./state.js";
 import { idbClear } from "./store.js";
 import { el, toast, friendlyError, applyTheme, isNetworkError, spotlight } from "./ui.js";
-import { showAdd, showEdit, showRecurringLog, showRecurringEdit, showFavorite } from "./entry.js";
+import { showAdd, showEdit, showRecurringLog, showRecurringEdit, showFavorite, showQuick } from "./entry.js";
 import { refreshRecurring, spotlightScheduled } from "./recurring.js";
 import { syncOutbox } from "./outbox.js";
 import { dataAsOf, clearStale } from "./offline.js";
@@ -95,6 +95,14 @@ function route() {
     showScreen("budget");
     showBudget();
     if (itemId) spotlightScheduled(decodeURIComponent(itemId));
+    return;
+  }
+  // An Apple Pay payment's "tap to save it": the Add form, filled in. The address becomes the tab's
+  // own, so coming back doesn't fill it in again.
+  if (hash.startsWith("#quick")) {
+    history.replaceState(null, "", "#add");
+    showScreen("add");
+    showQuick(new URLSearchParams(hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : ""));
     return;
   }
   // The notification center: from the bell on the Add tab (For me), or back to its Everything.
