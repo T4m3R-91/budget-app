@@ -146,7 +146,7 @@ function pendingRow(t) {
   return el("div", { class: `txn-row pending ${income ? "income" : "expense"}${t.sync_error ? " failed" : ""}` },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
-      el("span", { class: "txn-title", text: kind?.name || "Unknown" }),
+      el("span", { class: "txn-title", text: `${t.private_to ? "🔒 " : ""}${kind?.name || "Unknown"}` }),
       el("span", { class: "txn-sub", text: [byId(state.subcategories, t.subcategory_id)?.name, t.description].filter(Boolean).concat(note).join(" · ") })),
     el("span", { class: "txn-amt" },
       (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
@@ -182,7 +182,7 @@ function row(t) {
   return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}`, "data-id": t.id },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
-      el("span", { class: "txn-title", text: kind?.name || "Unknown" }),
+      el("span", { class: "txn-title", text: `${t.private_to ? "🔒 " : ""}${kind?.name || "Unknown"}` }), // private: only its person and owners see it
       el("span", { class: "txn-sub" }, el("span", { class: "txn-detail", text: detail }), due ? el("span", { class: "txn-due", text: due }) : null)),
     el("span", { class: "txn-amt" },
       (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),

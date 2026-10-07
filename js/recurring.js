@@ -392,7 +392,7 @@ function rowEl({ item, due }, today) {
       el("button", {
         type: "button", class: "rec-name", "aria-expanded": String(menuFor === k),
         onclick: () => { menuFor = menuFor === k ? null : k; stopArmed = null; paintRecurring(); },
-      }, el("span", { text: `${source?.icon || "•"} ${source?.name || "Unknown"}` }), el("span", { class: "rec-more", "aria-hidden": "true", text: "▾" })),
+      }, el("span", { text: `${item.private_to ? "🔒 " : ""}${source?.icon || "•"} ${source?.name || "Unknown"}` }), el("span", { class: "rec-more", "aria-hidden": "true", text: "▾" })),
       el("span", { class: "rec-amt", text: amount })),
     details ? el("div", { class: "rec-details", text: details }) : null,
     el("div", { class: "rec-line" },
@@ -488,6 +488,7 @@ async function logNow(item, due, button, on = isoLocal()) {
       category_id: expense ? item.category_id : null, subcategory_id: expense ? item.subcategory_id : null,
       income_source_id: expense ? null : item.income_source_id, payment_method_id: expense ? item.payment_method_id : null,
       who: item.who, description: item.description, recurring_id: item.id, recurring_due_on: due,
+      ...(item.private_to ? { private_to: item.private_to } : {}), // as private as its payment
     });
     notifyActivity("log", saved.id); // the others hear it's been paid (or received)
     const pts = Number.isInteger(saved.points) ? saved.points : null;

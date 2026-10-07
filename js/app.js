@@ -412,7 +412,11 @@ async function boot() {
     return;
   }
   sb.auth.onAuthStateChange((event) => {
-    if (event === "SIGNED_OUT") showLogin();
+    if (event !== "SIGNED_OUT") return;
+    // What was kept for offline use was this person's view (their private entries too): the next
+    // person signing in on this phone starts from the server. Entries still waiting to sync stay.
+    idbClear("cache").catch(() => {});
+    showLogin();
   });
   window.addEventListener("hashchange", route);
   // Offline, the saved sign-in is used as is: asking supabase-js would first try to renew an

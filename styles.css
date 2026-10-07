@@ -352,6 +352,24 @@ a.btn { display: inline-block; text-decoration: none; }
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; line-height: 1;
 }
 .income-mode .repeat-btn { background: var(--income); } /* green in Income, like its other highlights */
+/* By: its right 25% is 🔒 Private, laid out like On's ↻ Repeat (entry.js): grey while it's shared,
+   filled once private, when the tile is tinted and says "Private" under the name. */
+.meta-tile.has-lock {
+  display: grid; align-items: center; padding: 0;
+  grid-template-columns: minmax(6px, 1fr) minmax(0, auto) minmax(calc(25% + 4px), 1fr);
+}
+.meta-tile.has-lock .on-text { grid-column: 2; }
+.meta-tile.has-lock select { width: 75%; }
+.lock-btn {
+  position: absolute; top: 0; bottom: 0; right: 0; z-index: 1; width: 25%; padding: 0;
+  border: 0; border-left: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0;
+  background: transparent; font-size: 14px; line-height: 1; filter: grayscale(1); opacity: 0.6;
+}
+.lock-btn.on { background: var(--accent); border-left-color: transparent; filter: none; opacity: 1; }
+.income-mode .lock-btn.on { background: var(--income); }
+.lock-btn:disabled { cursor: default; }
+.meta-tile.is-private { background: color-mix(in srgb, var(--accent) 14%, var(--panel2)); }
+.income-mode .meta-tile.is-private { background: color-mix(in srgb, var(--income) 14%, var(--panel2)); }
 .meta-tile .r { color: var(--accent); font-size: 11px; line-height: 1.2; }
 .income-mode .meta-tile .r { color: var(--income); }
 .repeat-seg { grid-column: 1 / -1; display: flex; }

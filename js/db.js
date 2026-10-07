@@ -61,13 +61,20 @@ export async function fetchTransaction(id) {
 // has run, the database refuses that; the entry is then saved as "live" (same rate, older label).
 const historicalRefused = (row, e) => row.rate_source === "historical" && e?.code === "23514" && /rate_source/.test(e.message || "");
 
+// Private (private_to) is only sent when something is or was private; until private-migration.sql
+// has run, there's no such column, so say that rather than the database's words.
+function privacyMissing(row, e) {
+  if (!("private_to" in row) || e?.code !== "PGRST204") return e;
+  return new Error("Private entries aren't set up yet. Run private-migration.sql in Supabase.");
+}
+
 // row may carry its own id (new entries do), so a retry after a lost reply can't save it twice.
 export async function insertTransaction(row) {
   try {
     return unwrap(await sb.from("transactions").insert(row).select().single());
   } catch (e) {
     if (historicalRefused(row, e)) return insertTransaction({ ...row, rate_source: "live" });
-    throw e;
+    throw privacyMissing(row, e);
   }
 }
 
@@ -76,7 +83,7 @@ export async function updateTransaction(id, patch) {
     return unwrap(await sb.from("transactions").update(patch).eq("id", id).select().single());
   } catch (e) {
     if (historicalRefused(patch, e)) return updateTransaction(id, { ...patch, rate_source: "live" });
-    throw e;
+    throw privacyMissing(patch, e);
   }
 }
 
@@ -159,7 +166,7 @@ export async function insertRecurring(row) {
     return unwrap(await sb.from("recurring_items").insert(row).select().single());
   } catch (e) {
     if (onceRefused(row, e)) return insertRecurring(asYearlyOnce(row));
-    throw e;
+    throw privacyMissing(row, e);
   }
 }
 
@@ -168,7 +175,7 @@ export async function updateRecurring(id, patch) {
     unwrap(await sb.from("recurring_items").update(patch).eq("id", id));
   } catch (e) {
     if (onceRefused(patch, e) && patch.starts_on) return updateRecurring(id, asYearlyOnce(patch));
-    throw e;
+    throw privacyMissing(patch, e);
   }
 }
 
