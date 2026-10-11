@@ -1,9 +1,9 @@
-// The Settings card in Profile, collapsed until opened: Day/Night theme and the household's lists
+// The Settings card in Profile, collapsed until opened: hide amounts, Day/Night theme and the household's lists
 // (add / rename / reorder / hide). Items are hidden rather than deleted so past entries keep
 // their category names.
 
 import { state, subcategoriesOf } from "./state.js";
-import { el, toast, friendlyError, themeChoice, setThemeChoice } from "./ui.js";
+import { el, toast, friendlyError, themeChoice, setThemeChoice, amountsHidden, setAmountsHidden } from "./ui.js";
 import { reloadLists, insertListItem, updateListItem } from "./db.js";
 
 const expanded = new Set(); // categories whose subcategory list is open
@@ -31,6 +31,7 @@ function render() {
       }, el("span", { text: "Settings" }), el("span", { class: "chev", "aria-hidden": "true", text: "▸" }))),
     ...(open
       ? [
+          privacySection(),
           appearanceSection(),
           listSection({ title: "Categories", table: "categories", items: state.categories, withIcon: true, nested: true }),
           listSection({ title: "Payment methods", table: "payment_methods", items: state.paymentMethods }),
@@ -52,6 +53,24 @@ async function change(fn, success) {
     toast(friendlyError(e));
   }
   render();
+}
+
+// ---------- hide amounts ----------
+
+// For showing the screen to someone: money and percentages turn into •••• everywhere in the app
+// (ui.js). Saved on this device only. Push notifications have their own "Show amounts" switch
+// (Profile → Notifications); exports aren't affected. Same switch and row as the notification ones.
+function privacySection() {
+  const hidden = amountsHidden();
+  return el("section", { class: "set-section" },
+    el("div", { class: "push-row" },
+      el("div", { class: "push-text" },
+        el("span", { class: "push-title", text: "Hide amounts" }),
+        el("span", { class: "muted small", text: hidden ? "On. Amounts and percentages show as •••• on this device." : "Off. Turn on to hide amounts and percentages, for showing your screen." })),
+      el("button", {
+        type: "button", class: "switch", role: "switch", "aria-checked": String(hidden), "aria-label": "Hide amounts",
+        onclick: () => { setAmountsHidden(!hidden); render(); },
+      })));
 }
 
 // ---------- appearance ----------

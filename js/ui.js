@@ -19,11 +19,49 @@ export function el(tag, props, ...children) {
   return node;
 }
 
+// ---------- hide amounts (saved on this device; set in Profile → Settings) ----------
+
+// While on, every money figure and percentage is drawn as a fixed-length mask, so the real value
+// never reaches the screen, a tooltip or a label. Shapes (bars, tiles) are left as they are.
+const HIDE_KEY = "hideAmounts";
+export const MASK = "••••";
+export const MASK_PCT = "••%";
+let hidden_ = (() => {
+  try { return localStorage.getItem(HIDE_KEY) === "1"; } catch { return false; }
+})();
+
+export const amountsHidden = () => hidden_;
+
+export function setAmountsHidden(on) {
+  hidden_ = Boolean(on);
+  try { localStorage.setItem(HIDE_KEY, hidden_ ? "1" : "0"); } catch { /* private mode: applies until the app closes */ }
+  window.dispatchEvent(new Event("amountschange"));
+}
+
+// A percentage like "18%", or its mask.
+export const fmtPct = (text) => (hidden_ ? MASK_PCT : text);
+
+// A field that opens already holding a figure (editing an entry, a budget): while hidden it shows
+// the mask instead. Tapping it clears the mask so a new figure can be typed; left empty it shows
+// the mask again, and typing anything makes it an ordinary field. fieldValue() reads it back (the
+// real figure while the mask is still showing). Returns whether it's masked.
+export function maskField(input) {
+  if (!hidden_ || !input.value) return false;
+  input.dataset.real = input.value;
+  input.dataset.masked = "1";
+  input.value = MASK;
+  input.addEventListener("focus", () => { if (input.dataset.masked) input.value = ""; });
+  input.addEventListener("blur", () => { if (input.dataset.masked && !input.value) input.value = MASK; });
+  input.addEventListener("input", () => { delete input.dataset.masked; delete input.dataset.real; });
+  return true;
+}
+export const fieldValue = (input) => (input.dataset.masked ? input.dataset.real : input.value);
+
 // "EGP 1,450" / "$15.99"; with { code: true } USD is spelled out too: "USD 15.99".
 export function fmtMoney(n, currency, { decimals, code = false } = {}) {
   const v = Number(n) || 0;
   const d = decimals ?? (Math.abs(v % 1) > 0.004 ? 2 : 0);
-  const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const s = hidden_ ? MASK : Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   const unit = currency === "USD" ? (code ? "USD " : "$") : "EGP ";
   return (v < 0 ? "−" : "") + unit + s;
 }

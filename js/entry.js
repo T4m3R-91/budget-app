@@ -5,7 +5,7 @@
 // On tile makes a new entry repeat; the row of favorites above the amount fills the form in a tap.
 
 import { state, byId, subcategoriesOf, isActive, isOwner } from "./state.js";
-import { el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
+import { maskField, MASK, el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
 import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
@@ -386,19 +386,23 @@ function render() {
   // The amount box shows the result of the currency row above it: the number and its unit,
   // centered in the box, and the converted value underneath. The input is as wide as what's typed
   // (see .amount-fit), so the pair stays centered.
+  const amountInput = el("input", {
+    id: "e-amount", class: "amount-input", type: "text", inputmode: "decimal", size: 1,
+    autocomplete: "off", enterkeyhint: "done", placeholder: "0", "aria-label": "Amount",
+    value: f.amountText,
+    oninput: (e) => {
+      f.amountText = e.target.value;
+      f.amountTouched = true;
+      fitAmount();
+      renderConverted();
+    },
+  });
+  // Hide amounts: an existing entry's or scheduled payment's figure shows as a mask until retyped.
+  // A new entry's box stays as it is, and so does a form already being typed in.
+  if (!adding && !f.amountTouched) maskField(amountInput);
   const amountBox = el("label", { id: "e-amount-box", class: "amount-box" },
     el("span", { class: "amount-main" },
-      el("span", { id: "e-amount-fit", class: "amount-fit" },
-        el("input", {
-          id: "e-amount", class: "amount-input", type: "text", inputmode: "decimal", size: 1,
-          autocomplete: "off", enterkeyhint: "done", placeholder: "0", "aria-label": "Amount",
-          value: f.amountText,
-          oninput: (e) => {
-            f.amountText = e.target.value;
-            fitAmount();
-            renderConverted();
-          },
-        })),
+      el("span", { id: "e-amount-fit", class: "amount-fit" }, amountInput),
       el("span", { id: "e-amount-cur", class: "amount-cur" })),
     el("span", { id: "e-converted", class: "converted", "aria-live": "polite" }));
 
@@ -455,7 +459,7 @@ function render() {
 // The amount input takes the width of what's typed (or the "0" placeholder).
 function fitAmount() {
   const fit = $("e-amount-fit");
-  if (fit) fit.dataset.value = f.amountText || "0";
+  if (fit) fit.dataset.value = $("e-amount")?.dataset.masked ? MASK : f.amountText || "0";
 }
 
 // ---------- tags in the note (tags.js) ----------

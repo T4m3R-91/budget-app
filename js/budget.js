@@ -5,7 +5,7 @@
 // one category amount.
 
 import { state, byId } from "./state.js";
-import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate } from "./ui.js";
+import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate, amountsHidden, MASK, maskField, fieldValue } from "./ui.js";
 import { parseAmount } from "./numbers.js";
 import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate, notifyActivity } from "./db.js";
 import { paintRecurring, refreshRecurring, furthestDueMonth, scheduledFor, rateNow } from "./recurring.js";
@@ -17,7 +17,8 @@ const NOT_SET_UP = "Budgets aren't set up yet. Run budgets-migration.sql in Supa
 export const monthOf = (iso) => `${iso.slice(0, 7)}-01`;
 
 // Short amounts for the budget bars and tiles: 950, 10.62K, 16K, 1.25M (two decimals at most).
-export function compact(n) {
+// With amounts hidden (ui.js) it's the mask instead; compactReal is for logic that must see the figure.
+function compactReal(n) {
   const two = (x) => Math.round(x * 100) / 100;
   const v = Math.abs(n);
   const sign = n < 0 ? "−" : "";
@@ -26,6 +27,7 @@ export function compact(n) {
   if (two(v / 1e3) >= 1) return `${sign}${fmt(two(v / 1e3))}K`;
   return `${sign}${Math.round(v).toLocaleString("en-US")}`;
 }
+export const compact = (n) => (amountsHidden() ? MASK : compactReal(n));
 export function shiftMonth(month, by) {
   const d = parseISODate(month);
   d.setMonth(d.getMonth() + by);
@@ -35,7 +37,7 @@ const monthName = (month) => MONTH_NAMES[Number(month.slice(5, 7)) - 1];
 const monthShort = (month) => `${monthName(month).slice(0, 3)} ${month.slice(0, 4)}`;
 
 const egp = (n) => fmtMoney(n, "EGP", { decimals: 0 });
-const plain = (n) => Math.round(n).toLocaleString("en-US");
+const plain = (n) => (amountsHidden() ? MASK : Math.round(n).toLocaleString("en-US"));
 const toMap = (rows) => new Map(rows.map((r) => [r.category_id, Number(r.amount_egp)]));
 function spentBy(rows) {
   const out = new Map();
@@ -321,7 +323,7 @@ function outlookLines(o, inUsd) {
   if (o.forecast == null) forecast = el("div", { class: "fc", text: `Forecast from ${o.from}` });
   else {
     const diff = o.forecast - o.total;
-    const by = compact(Math.abs(diff)) === "0" ? "on budget" : `${compact(Math.abs(diff))} ${diff > 0 ? "over" : "under"}`;
+    const by = compactReal(Math.abs(diff)) === "0" ? "on budget" : `${compact(Math.abs(diff))} ${diff > 0 ? "over" : "under"}`;
     forecast = el("div", { class: `fc${diff > 0 && by !== "on budget" ? " over" : ""}`, text: `At this pace: EGP ${compact(o.forecast)} of ${compact(o.total)} (${by})` });
   }
   return el("div", { class: "bud-outlook" }, el("div", { class: "k", text: "Safe to spend" }), safe, forecast);
@@ -385,13 +387,14 @@ function renderEditor() {
   const name = monthName(form.month);
   const inputs = [];
   const total = el("strong");
-  const paintTotal = () => { total.textContent = egp(inputs.reduce((s, i) => s + (parseAmount(i.value) || 0), 0)); };
+  const paintTotal = () => { total.textContent = egp(inputs.reduce((s, i) => s + (parseAmount(fieldValue(i)) || 0), 0)); };
   const rows = form.lines.map((l) => {
     const input = el("input", {
       class: "text-input bud-input", type: "text", inputmode: "decimal", autocomplete: "off", enterkeyhint: "next",
       placeholder: "No budget", "aria-label": `${l.cat.name} budget in EGP`, value: l.value ? String(l.value) : "",
       oninput: paintTotal,
     });
+    maskField(input); // hide amounts: a figure already in the box shows as a mask until retyped
     inputs.push(input);
     return el("label", { class: "bud-edit-row" },
       el("span", { class: "bud-edit-ico", "aria-hidden": "true", text: l.cat.icon }),
@@ -421,7 +424,7 @@ async function saveEditor(inputs, button) {
   const items = [];
   const bad = [];
   form.lines.forEach((l, i) => {
-    const raw = inputs[i].value.trim();
+    const raw = fieldValue(inputs[i]).trim();
     if (!raw || /^[\s0٠۰.,]+$/.test(raw)) return; // blank or zero: no budget for this category
     const amount = parseAmount(raw);
     if (amount == null || amount < 0) bad.push(inputs[i]);
