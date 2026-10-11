@@ -72,11 +72,12 @@ function buildBar() {
         value: filters.search,
         oninput: (e) => { filters.search = e.target.value; changed(); },
       }),
-      el("div", { class: "ms-wrap", id: "f-ms-cat" }),
-      el("div", { class: "ms-wrap", id: "f-ms-who" }),
-      el("div", { class: "ms-wrap", id: "f-ms-pay" }),
-      el("div", { class: "ms-wrap", id: "f-ms-tag" }),
-      dateFilter(),
+      el("div", { class: "filter-btns" },
+        el("div", { class: "ms-wrap", id: "f-ms-cat" }),
+        el("div", { class: "ms-wrap", id: "f-ms-who" }),
+        el("div", { class: "ms-wrap", id: "f-ms-pay" }),
+        el("div", { class: "ms-wrap", id: "f-ms-tag" }),
+        dateFilter()),
       el("button", { type: "button", class: "btn primary small clear-filters", "aria-label": "Clear filters", title: "Clear filters", onclick: clearFilters },
         trashIcon())));
   bar = node;

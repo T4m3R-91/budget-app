@@ -357,7 +357,7 @@ export async function showBudgetEditor(yearMonth) {
     if (form !== editor) return;
     screen.replaceChildren(
       el("p", { class: "muted", text: isMissing(e) ? NOT_SET_UP : friendlyError(e) }),
-      el("a", { class: "link-btn", href: "#budget", text: "Back to Budget" }));
+      el("a", { class: "link-btn", href: "#budget", text: "Back to Budget", onclick: () => openBudgetOn(month) }));
     return;
   }
   if (form !== editor) return;
@@ -405,7 +405,7 @@ function renderEditor() {
 
   document.getElementById("screen-budgetform").replaceChildren(
     el("div", { class: "entry-head" },
-      el("a", { class: "link-btn", href: "#budget", text: "Cancel" }),
+      el("a", { class: "link-btn", href: "#budget", text: "Cancel", onclick: () => openBudgetOn(form.month) }),
       el("h2", { text: `${name} budget` }),
       el("span")),
     el("p", { class: "bud-sub", text: `In EGP · averages from ${form.span}` }),
