@@ -422,7 +422,8 @@ async function boot() {
   sb.auth.onAuthStateChange((event) => {
     if (event !== "SIGNED_OUT") return;
     // What was kept for offline use was this person's view (their private entries too): the next
-    // person signing in on this phone starts from the server. Entries still waiting to sync stay.
+    // person signing in on this phone starts from the server. Entries still waiting to sync stay,
+    // for whoever saved them (outbox.js).
     idbClear("cache").catch(() => {});
     showLogin();
   });

@@ -10,8 +10,8 @@ import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
-  insertTransaction, updateTransaction, deleteTransaction, latestEntryRate, fetchTransaction, fetchAllTransactions,
-  insertRecurring, deleteRecurring, linkToRecurring, notifyActivity, beforeOf,
+  insertTransaction, updateTransaction, deleteTransaction, eraseTransaction, latestEntryRate, fetchTransaction, fetchAllTransactions,
+  insertRecurring, eraseRecurring, linkToRecurring, notifyActivity, beforeOf,
   fetchFavorites, insertFavorite, updateFavorite, deleteFavorite, useFavorite,
 } from "./db.js";
 import { scanReceipt } from "./receipt.js";
@@ -67,7 +67,7 @@ function freshForm(type = "expense") {
     paymentMethodId: rememberedPayment(), receivingMethodId: rememberedReceiving(), who: state.me.email,
     private: false, // only the person it's By and owners see it (private-migration.sql)
     date: isoLocal(), description: "",
-    saving: false, confirmDelete: false,
+    saving: false, confirmDelete: false, erase: false, // erase: Delete also erases it from Everything
     repeat: null, repeatOpen: false, // null | "monthly" | "yearly" (| "once" for a scheduled item); repeatOpen shows its choices
     until: null, // a repeat's last day (inclusive), or null: until you remove it
     recurring: null, // { item, due } while logging a recurring item's due date through the form
@@ -349,7 +349,8 @@ function render() {
   const r = screen();
   const income = f.type === "income";
   commitRateEdit = null;
-  r.classList.toggle("income-mode", income);
+  r.classList.toggle("income-mode", income); // its highlights green
+  r.classList.toggle("expense-mode", !income); // red
 
   // Leaving a recurring form drops it, so the Add tab starts fresh next time.
   // Back to the Budget tab on the month the form was opened from.
@@ -460,16 +461,18 @@ function fitAmount() {
 // ---------- tags in the note (tags.js) ----------
 // Typing "@" in the note lists the household's tags under it (those in the notes of entries and
 // scheduled payments you can see), with how many use each, narrowing as you type. Tapping one
-// finishes it. The list is gathered once a minute at most, and again after a save.
+// finishes it. The list is gathered once a minute at most, and again after a save. Private ones'
+// tags are offered only for something private, so they don't end up in a shared note.
 
-let tagCache = null; // { at, me, list }: whose it is too, as private entries' tags are only theirs
+let tagCache = null; // { at, me, all, shared }: whose it is too, as private entries' tags are only theirs
 
-async function householdTags() {
+async function householdTags(withPrivate) {
   const me = state.me.email;
-  if (tagCache?.me === me && Date.now() - tagCache.at < 60000) return tagCache.list;
-  const entries = await fetchAllTransactions().catch(() => []);
-  tagCache = { at: Date.now(), me, list: tagList([...entries, ...scheduledItems()]) };
-  return tagCache.list;
+  if (tagCache?.me !== me || Date.now() - tagCache.at >= 60000) {
+    const rows = [...(await fetchAllTransactions().catch(() => [])), ...scheduledItems()];
+    tagCache = { at: Date.now(), me, all: tagList(rows), shared: tagList(rows.filter((r) => !r.private_to)) };
+  }
+  return withPrivate ? tagCache.all : tagCache.shared;
 }
 
 async function paintTagSuggest() {
@@ -478,7 +481,7 @@ async function paintTagSuggest() {
   if (!note || !box) return;
   const typing = document.activeElement === note ? typingTag(note.value, note.selectionStart ?? note.value.length) : null;
   if (!typing) { box.hidden = true; return; }
-  const list = await householdTags();
+  const list = await householdTags(Boolean(f?.private));
   if (note !== $("e-desc") || document.activeElement !== note) return; // moved on meanwhile
   const matches = suggestTags(list, typing.query);
   box.hidden = !matches.length;
@@ -1010,7 +1013,7 @@ async function save_() {
         label: "Undo",
         run: async () => {
           try {
-            await deleteRecurring(item.id);
+            await eraseRecurring(item.id); // a mistake: no record of it is left
             toast("Schedule removed");
           } catch (e) { toast(friendlyError(e)); }
           refreshRecurring();
@@ -1103,11 +1106,12 @@ function afterSave(form, row) {
   if (navigator.onLine) loadBudgetTiles();
 }
 
-// itemId: the recurring item this save set up; undoing the entry undoes the repeat too.
+// itemId: the recurring item this save set up; undoing the entry undoes the repeat too. A mistake,
+// not a deletion: no record of either is left in Everything.
 async function undo(id, points, itemId = null) {
   try {
-    await deleteTransaction(id);
-    if (itemId) await deleteRecurring(itemId);
+    await eraseTransaction(id, true);
+    if (itemId) await eraseRecurring(itemId);
     toast(points ? `Entry removed · −${points} pts` : "Entry removed");
     loadBudgetTiles();
     refreshRecurring();
@@ -1122,27 +1126,44 @@ async function onDelete(e) {
   if (!form.confirmDelete) {
     form.confirmDelete = true;
     btn.textContent = "Tap to confirm";
-    setTimeout(() => {
-      if (form.confirmDelete && btn.isConnected) {
-        form.confirmDelete = false;
-        btn.textContent = "Delete";
-      }
-    }, 4000);
+    if (form.mode === "edit") btn.closest(".actions").after(eraseChoice(form, btn));
+    disarmLater(form, btn);
     return;
   }
   btn.disabled = true;
   try {
     if (form.mode === "fav") return await deleteFav(form.fav.id);
-    await deleteTransaction(form.id);
+    await (form.erase ? eraseTransaction(form.id) : deleteTransaction(form.id));
     f = null;
-    toast("Entry deleted");
+    toast(form.erase ? "Entry deleted and erased" : "Entry deleted");
     location.hash = "#history";
   } catch (err) {
-    form.confirmDelete = false;
+    disarm(form, btn);
     btn.disabled = false;
-    btn.textContent = "Delete";
     toast(friendlyError(err));
   }
+}
+
+// "Tap to confirm" goes back to Delete after 4 s untouched (ticking the erase choice counts).
+function disarmLater(form, btn) {
+  clearTimeout(form.disarmTimer);
+  form.disarmTimer = setTimeout(() => { if (form.confirmDelete && btn.isConnected) disarm(form, btn); }, 4000);
+}
+
+function disarm(form, btn) {
+  form.confirmDelete = false;
+  form.erase = false;
+  btn.textContent = "Delete";
+  $("e-erase")?.remove();
+}
+
+// Under Delete, once tapped: erase it from Everything (the activity log) too, leaving no line about
+// it for anyone, the deletion included (privacy-fixes-migration.sql). Unticked, Everything keeps
+// its lines and says it was deleted.
+function eraseChoice(form, btn) {
+  return el("label", { id: "e-erase", class: "erase-choice" },
+    el("input", { type: "checkbox", onchange: (e) => { form.erase = e.target.checked; disarmLater(form, btn); } }),
+    "Also erase it from Everything");
 }
 
 // ---------- favorites ----------

@@ -2,8 +2,10 @@
 // returns: on reconnecting, when the app opens, and when you come back to it (iPhone doesn't let
 // web apps sync in the background). Each entry carries its own id, so one that did reach the
 // server before its reply was lost isn't saved twice. Points are scored when it arrives, so an
-// entry that syncs on a later day doesn't get the same-day bonus.
+// entry that syncs on a later day doesn't get the same-day bonus. Each waits for whoever saved it:
+// on a phone two people use, it's shown and sent only while they're signed in.
 
+import { state } from "./state.js";
 import { idbAll, idbPut, idbDelete } from "./store.js";
 import { insertTransaction, notifyActivity } from "./db.js";
 import { getRateOn } from "./fx.js";
@@ -11,19 +13,22 @@ import { toast, friendlyError, isNetworkError } from "./ui.js";
 
 const changed = () => window.dispatchEvent(new Event("outboxchange"));
 
-// Waiting entries, oldest first: the transaction rows as they'll be saved, plus queued_at,
+// Your waiting entries, oldest first: the transaction rows as they'll be saved, plus queued_at,
+// queued_by (who saved it; none on ones kept before it was noted, which anyone may send),
 // rate_pending (dated in the past, saved with today's rate standing in for its day's: it gets
 // its day's rate when it's sent) and, if the server turned one down, sync_error.
 export async function pendingEntries() {
   try {
-    return (await idbAll("outbox")).sort((a, b) => a.queued_at - b.queued_at);
+    return (await idbAll("outbox"))
+      .filter((e) => !e.queued_by || e.queued_by === state.me?.email)
+      .sort((a, b) => a.queued_at - b.queued_at);
   } catch {
     return [];
   }
 }
 
 export async function queueEntry(row) {
-  await idbPut("outbox", { ...row, queued_at: Date.now() });
+  await idbPut("outbox", { ...row, queued_at: Date.now(), queued_by: state.me.email });
   changed();
 }
 
@@ -47,7 +52,7 @@ async function send() {
   let refused = 0;
   let rerated = 0;
   for (const entry of waiting) {
-    const { queued_at, sync_error, rate_pending, ...row } = entry;
+    const { queued_at, queued_by, sync_error, rate_pending, ...row } = entry;
     const day = rate_pending ? await getRateOn(row.occurred_on) : null;
     if (day) Object.assign(row, { rate: day.rate, rate_source: "historical" });
     try {
