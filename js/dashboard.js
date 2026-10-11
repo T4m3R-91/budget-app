@@ -81,14 +81,14 @@ function build() {
       kpi("Total income", "d-kpi-income", "income"),
       kpi("Net", "d-kpi-net", "net")),
     el("div", { class: "chart-grid" },
+      el("div", { class: "card" }, el("h3", { text: "Spend by category" }),
+        el("div", { class: "treemap", id: "d-cat-box", role: "group", "aria-label": "Spend by category" }),
+        el("p", { id: "d-cat-detail", class: "tm-detail", "aria-live": "polite" })),
       el("div", { class: "card" },
         el("div", { class: "card-head" },
           el("h3", { text: "Cash flow" }),
           el("div", { id: "d-range", class: "seg small", role: "group", "aria-label": "Chart range" })),
-        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Cash flow chart: income, spend and cumulative net", role: "img" }))),
-      el("div", { class: "card" }, el("h3", { text: "Spend by category" }),
-        el("div", { class: "treemap", id: "d-cat-box", role: "group", "aria-label": "Spend by category" }),
-        el("p", { id: "d-cat-detail", class: "tm-detail", "aria-live": "polite" })))
+        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Cash flow chart: income, spend and cumulative net", role: "img" }))))
   );
   renderCurrencySeg();
   renderRangeSeg();
@@ -129,7 +129,7 @@ function renderAll() {
   if (!window.Chart) return;
   const css = getComputedStyle(document.documentElement);
   const token = (name) => css.getPropertyValue(name).trim();
-  Object.assign(COLOR, { spend: token("--accent"), income: token("--income"), muted: token("--muted"), line: token("--line"), text: token("--text") });
+  Object.assign(COLOR, { spend: token("--expense"), income: token("--income"), muted: token("--muted"), line: token("--line"), text: token("--text") });
   const expenses = filteredExpenses();
   const income = filteredIncome();
   renderKpis(expenses, income);
@@ -358,7 +358,7 @@ function paintTreemap() {
   const W = box.clientWidth, H = box.clientHeight;
   if (!W || !H) return; // hidden; the size observer paints once it's on screen
   const rects = squarify(tiles.map((t) => t.amount), W, H);
-  // The top category is exactly the Cash flow chart's spend blue. Every other tile (Other too)
+  // The top category is exactly the app's accent blue. Every other tile (Other too)
   // gets that blue in proportion to its amount compared with the top one (Food at 18% of Housing
   // is an 18% blue), blended toward a pale blue so the dark text stays readable. 5% at least,
   // so even the smallest tile keeps a hint of blue.

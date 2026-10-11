@@ -91,6 +91,18 @@ export async function deleteTransaction(id) {
   unwrap(await sb.from("transactions").delete().eq("id", id));
 }
 
+// Deletes an entry and erases it from the activity log, the record of the deletion included
+// (privacy-fixes-migration.sql): Delete with "Also erase from Everything", and Undo. Until the
+// migration has run: an error, or with orDelete (Undo), a plain delete.
+export async function eraseTransaction(id, orDelete = false) {
+  const { error } = await sb.rpc("erase_entry", { p_id: id });
+  if (error?.code === "PGRST202") {
+    if (orDelete) return deleteTransaction(id);
+    throw new Error("Erasing isn't set up yet. Run privacy-fixes-migration.sql in Supabase.");
+  }
+  if (error) throw error;
+}
+
 export function latestEntryRate() {
   return cached("latest-rate", async () => unwrap(
     await sb.from("transactions").select("rate, occurred_on").order("created_at", { ascending: false }).limit(1).maybeSingle()
@@ -181,6 +193,14 @@ export async function updateRecurring(id, patch) {
 
 export async function deleteRecurring(id) {
   unwrap(await sb.from("recurring_items").delete().eq("id", id));
+}
+
+// Undoing a scheduled payment just made: it goes, and so does its record in the activity log
+// (privacy-fixes-migration.sql; before it, a plain delete).
+export async function eraseRecurring(id) {
+  const { error } = await sb.rpc("erase_scheduled", { p_id: id });
+  if (error?.code === "PGRST202") return deleteRecurring(id);
+  if (error) throw error;
 }
 
 // Changes a scheduled payment from a date on: it continues as a new one with these changes (the
@@ -346,8 +366,9 @@ export function notifyActivity(kind, id, extra = {}) {
 }
 
 // What an entry or scheduled payment was before an edit, for the others' "EGP 450 → EGP 520".
+// private_to: so that whoever couldn't see it then is told only that it's been shared.
 const BEFORE = ["type", "amount", "currency", "category_id", "subcategory_id", "income_source_id", "payment_method_id",
-  "receiving_method_id", "occurred_on", "description", "who", "frequency", "day", "month", "starts_on", "ended_on"];
+  "receiving_method_id", "occurred_on", "description", "who", "frequency", "day", "month", "starts_on", "ended_on", "private_to"];
 export const beforeOf = (row) => Object.fromEntries(BEFORE.filter((k) => k in row).map((k) => [k, row[k]]));
 
 // Asks the notify function: "key" -> { publicKey }, "test" -> { devices, sent, removed, failed,

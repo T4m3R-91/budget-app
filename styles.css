@@ -21,6 +21,7 @@
   --income-soft: #2bb67a1f;
   --expense: #f85149;
   --expense-soft: #f851491f;
+  --expense-fill: #da3633; /* solid red behind white text (Save, badges): --expense is a text red, too light for that */
   --good: #3fb950;
   --warn: #f0a020;
   --critical: #f85149;
@@ -62,6 +63,7 @@
   --income-soft: #1a7f371a;
   --expense: #cf222e;
   --expense-soft: #cf222e17;
+  --expense-fill: #cf222e;
   --good: #1a7f37;
   --warn: #9a6700;
   --critical: #cf222e;
@@ -138,6 +140,7 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 5px; font-siz
 }
 .btn.primary { background: var(--accent); color: #fff; }
 .income-mode .btn.primary { background: var(--income); }
+.expense-mode .btn.primary { background: var(--expense-fill); }
 .btn.secondary { background: var(--panel2); border-color: var(--line); }
 .btn.danger { background: transparent; border-color: var(--critical); color: var(--critical); }
 .btn:disabled { opacity: 0.45; cursor: default; }
@@ -150,6 +153,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .seg button { border: 0; background: transparent; color: var(--muted); padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; }
 .seg button.active { background: var(--accent); color: #fff; }
 .seg button.active.is-income { background: var(--income); }
+.expense-mode .seg button.active { background: var(--expense-fill); } /* Add tab: Expense, currency, repeat */
 .seg.small button { padding: 6px 12px; font-size: 13px; }
 
 /* ---------- login ---------- */
@@ -177,7 +181,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .bell svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .bell-badge {
   position: absolute; top: 1px; right: 0; min-width: 17px; height: 17px; padding: 0 5px;
-  border-radius: 9px; background: var(--expense); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
+  border-radius: 9px; background: var(--expense-fill); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
 }
 
 /* What a tapped notification was about (an entry in History, a scheduled payment on the Budget
@@ -236,6 +240,7 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .amount-box:focus-within { border-color: var(--accent); }
 .income-mode .amount-box:focus-within { border-color: var(--income); }
+.expense-mode .amount-box:focus-within { border-color: var(--expense); }
 .amount-main { display: flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 0; max-width: 100%; }
 .amount-cur { color: var(--muted); font-size: 13px; font-weight: 600; }
 /* The input is exactly as wide as its text: an invisible copy of the text (data-value) sizes the
@@ -275,30 +280,32 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .cat-btn.sel { border-color: var(--accent); background: var(--accent-soft); }
 .income-mode .cat-btn.sel { border-color: var(--income); background: var(--income-soft); }
-/* Budgeted category: a soft blue fill grows left to right to the share used (--used), fading at
-   its edge, with what's left underneath. Over budget: full and red. Comes after .sel so a picked
-   tile keeps its fill (the blue border still marks it). */
+.expense-mode .cat-btn.sel { border-color: var(--expense); }
+.expense-mode .cat-btn.sel:not(.budgeted) { background: var(--expense-soft); }
+/* Budgeted category: a soft red fill (expenses are red) grows left to right to the share used
+   (--used), fading at its edge, with what's left underneath. Over budget: full. Comes after .sel so
+   a picked tile keeps its fill (the red border still marks it). */
 .cat-btn.budgeted {
   gap: 2px;
   background: linear-gradient(to right,
-    color-mix(in srgb, var(--accent) 26%, var(--panel)) calc(var(--used) - 8%),
+    color-mix(in srgb, var(--expense) 26%, var(--panel)) calc(var(--used) - 8%),
     var(--panel) var(--used));
 }
 .cat-btn.budgeted.over { background: color-mix(in srgb, var(--expense) 22%, var(--panel)); }
-/* Scheduled payments not logged yet: pale blue stripes from where the spent fill ends (orange when
-   they'd take the category over), behind the icon and name. */
+/* Scheduled payments not logged yet: pale red stripes from where the spent fill ends (stronger,
+   and the figure red, when they'd take the category over), behind the icon and name. */
 .cat-btn.budgeted { position: relative; }
 .cat-btn.budgeted > :not(.planned) { position: relative; z-index: 1; }
 .cat-btn .planned {
   position: absolute; top: 0; bottom: 0; z-index: 0;
   background: repeating-linear-gradient(-45deg,
-    color-mix(in srgb, var(--accent) 17%, transparent) 0 4px, color-mix(in srgb, var(--accent) 5%, transparent) 4px 8px);
+    color-mix(in srgb, var(--expense) 17%, transparent) 0 4px, color-mix(in srgb, var(--expense) 5%, transparent) 4px 8px);
 }
 .cat-btn.will-over .planned {
   background: repeating-linear-gradient(-45deg,
-    color-mix(in srgb, var(--warn) 24%, transparent) 0 4px, color-mix(in srgb, var(--warn) 7%, transparent) 4px 8px);
+    color-mix(in srgb, var(--expense) 24%, transparent) 0 4px, color-mix(in srgb, var(--expense) 7%, transparent) 4px 8px);
 }
-.cat-btn.will-over .left { color: var(--warn); font-weight: 600; }
+.cat-btn.will-over .left { color: var(--expense); font-weight: 600; }
 .cat-btn.budgeted .ico { font-size: 17px; }
 .cat-btn.budgeted .nm { -webkit-line-clamp: 1; max-width: 100%; }
 .cat-btn .left { font-size: 10.5px; line-height: 1.1; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -313,6 +320,7 @@ a.btn { display: inline-block; text-decoration: none; }
   border: 1px solid var(--line); font-size: 14px; color: var(--text);
 }
 .subchip.sel { border-color: var(--accent); background: var(--accent-soft); }
+.expense-mode .subchip.sel { border-color: var(--expense); background: var(--expense-soft); }
 
 /* By · On · With (income: In): the same grid and size as the category tiles, but grey like the
    Scan button, so they read as the entry's details rather than more categories. */
@@ -326,11 +334,16 @@ a.btn { display: inline-block; text-decoration: none; }
 /* Not a button (a favorite's By and On): dashed outline, no fill, faded text. */
 .meta-tile.fixed { cursor: default; background: transparent; border-style: dashed; }
 .meta-tile.fixed .k, .meta-tile.fixed .v { color: var(--faint); }
-/* In Income mode every focus highlight is green, matching the income tiles and Save button. */
+/* In Income mode every focus highlight is green, matching the income tiles and Save button; in
+   Expense mode, red. */
 .income-mode .meta-tile:focus-within,
 .income-mode .text-input:focus { border-color: var(--income); }
 .income-mode .amount-input { caret-color: var(--income); }
 .income-mode :focus-visible { outline-color: var(--income); }
+.expense-mode .meta-tile:focus-within,
+.expense-mode .text-input:focus { border-color: var(--expense); }
+.expense-mode .amount-input { caret-color: var(--expense); }
+.expense-mode :focus-visible { outline-color: var(--expense); }
 .meta-tile .k { color: var(--muted); font-size: 11px; line-height: 1.2; }
 .meta-tile .v { max-width: 100%; font-size: 14px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta-tile select, .meta-tile input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
@@ -352,6 +365,7 @@ a.btn { display: inline-block; text-decoration: none; }
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; line-height: 1;
 }
 .income-mode .repeat-btn { background: var(--income); } /* green in Income, like its other highlights */
+.expense-mode .repeat-btn { background: var(--expense-fill); }
 /* By: its right 25% is 🔒 Private, laid out like On's ↻ Repeat (entry.js): grey while it's shared,
    filled once private, when the tile is tinted and says "Private" under the name. */
 .meta-tile.has-lock {
@@ -367,11 +381,14 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .lock-btn.on { background: var(--accent); border-left-color: transparent; filter: none; opacity: 1; }
 .income-mode .lock-btn.on { background: var(--income); }
+.expense-mode .lock-btn.on { background: var(--expense-fill); }
 .lock-btn:disabled { cursor: default; }
 .meta-tile.is-private { background: color-mix(in srgb, var(--accent) 14%, var(--panel2)); }
 .income-mode .meta-tile.is-private { background: color-mix(in srgb, var(--income) 14%, var(--panel2)); }
+.expense-mode .meta-tile.is-private { background: color-mix(in srgb, var(--expense) 14%, var(--panel2)); }
 .meta-tile .r { color: var(--accent); font-size: 11px; line-height: 1.2; }
 .income-mode .meta-tile .r { color: var(--income); }
+.expense-mode .meta-tile .r { color: var(--expense); }
 .repeat-seg { grid-column: 1 / -1; display: flex; }
 /* Tags (tags.js): an @tag in a note stands out. Typing one lists the household's just above the
    note, over the details, always: on a phone the keyboard hides whatever is below the note, and the
@@ -433,6 +450,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .fav.active .fav-name { color: var(--text); font-weight: 600; }
 .income-mode .fav-new .fav-ring { color: var(--income); }
 .income-mode .fav.active .fav-ring { border-color: var(--income); box-shadow: 0 0 0 3px var(--income-soft); }
+.expense-mode .fav-new .fav-ring { color: var(--expense); }
+.expense-mode .fav.active .fav-ring { border-color: var(--expense); box-shadow: 0 0 0 3px var(--expense-soft); }
 .fav.held .fav-ring { transform: scale(0.9); }
 /* A favorite's own form: its emoji and name, above the amount. */
 .fav-fields { display: flex; gap: 8px; margin-top: 12px; }
@@ -455,6 +474,9 @@ a.btn { display: inline-block; text-decoration: none; }
 .actions { display: grid; grid-template-columns: 1fr; gap: 10px; max-width: 560px; margin: 0 auto; }
 .actions.two { grid-template-columns: auto 1fr; }
 .actions .btn { height: 48px; padding-top: 0; padding-bottom: 0; }
+/* Under Delete once it's tapped (entry.js): erase it from Everything too. */
+.erase-choice { display: flex; align-items: center; gap: 8px; max-width: 560px; margin: 10px auto 0; color: var(--muted); font-size: 13.5px; }
+.erase-choice input { width: 18px; height: 18px; margin: 0; accent-color: var(--critical); }
 
 /* Missing required fields: a shake and a red glow on each Save tap. */
 .flag { animation: shake 0.4s ease, glow 1.6s ease-out; }
@@ -578,7 +600,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .kpi .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
 .kpi .num { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.kpi.spend .num { color: var(--accent); }
+.kpi.spend .num { color: var(--expense); }
 .kpi.income .num { color: var(--income); }
 .kpi .num.pos { color: var(--good); }
 .kpi .num.neg { color: var(--critical); }
@@ -833,7 +855,7 @@ a.btn { display: inline-block; text-decoration: none; }
 /* Budget tab: how many recurring items are due today or overdue. */
 .tab-badge {
   position: absolute; top: 5px; left: calc(50% + 6px); min-width: 17px; height: 17px; padding: 0 5px;
-  border-radius: 9px; background: var(--expense); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
+  border-radius: 9px; background: var(--expense-fill); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
 }
 
 #toast {

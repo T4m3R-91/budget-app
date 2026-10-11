@@ -9,6 +9,7 @@
 import { state } from "./state.js";
 import { el, friendlyError, friendlyDate, isoLocal, toast } from "./ui.js";
 import { fetchInbox, markInboxRead, fetchActivity, deleteActivity, LOG_PAGE } from "./db.js";
+import { dataAsOf } from "./offline.js";
 import { describe, removable } from "./activity.js";
 
 const inbox = { status: "idle", rows: [], message: "" }; // idle | ready | missing | error
@@ -25,9 +26,11 @@ export function refreshInbox() {
 }
 
 async function load() {
+  const asked = Date.now();
   try {
     const rows = await fetchInbox();
     Object.assign(inbox, rows === null ? { status: "missing", rows: [] } : { status: "ready", rows });
+    if (rows && !dataAsOf()) clearTray(rows, asked); // fresh from the server, not the phone's copy
   } catch (e) {
     // Keep what's on screen; say so only when there's nothing to show.
     Object.assign(inbox, { status: inbox.rows.length ? "ready" : "error", message: friendlyError(e) });
@@ -37,6 +40,20 @@ async function load() {
 }
 
 const unread = () => inbox.rows.filter((n) => !n.read_at).length;
+
+// The phone's notification tray follows For me: a notification no longer in it (about something
+// deleted or made private since, privacy-fixes-migration.sql, or a reminder with nothing due any
+// more) is closed there too, and so is a test. Only those already showing when For me was asked
+// for, so one arriving meanwhile stays. Where the browser can't list them, the tray keeps them
+// until they're dismissed.
+async function clearTray(rows, asked) {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    const showing = (await reg?.getNotifications?.()) || [];
+    const kept = new Set(rows.map((n) => n.url));
+    for (const n of showing) if (!kept.has(n.data?.url) && !(n.timestamp > asked)) n.close();
+  } catch { /* not supported */ }
+}
 
 // ---------- the bell ----------
 

@@ -11,7 +11,7 @@ import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate, spotlight }
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, continueRecurring, skipOccurrence, unskipOccurrence,
-  fetchUnlinkedBetween, insertTransaction, deleteTransaction, latestEntryRate, notifyActivity,
+  fetchUnlinkedBetween, insertTransaction, eraseTransaction, latestEntryRate, notifyActivity,
 } from "./db.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -500,7 +500,7 @@ async function logNow(item, due, button, on = isoLocal()) {
       label: "Undo",
       run: async () => {
         try {
-          await deleteTransaction(saved.id);
+          await eraseTransaction(saved.id, true); // a mistake: no record of it is left in Everything
           toast(pts ? `Entry removed · −${pts} pts` : "Entry removed");
           window.dispatchEvent(new Event("entrieschange")); // the budget bars follow
         } catch (e) { toast(friendlyError(e)); }

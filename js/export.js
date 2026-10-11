@@ -10,11 +10,14 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const RATE = "Rate at Entry (EGP per USD)";
 const MONEY_COLUMNS = new Set(["Amount", "Amount_EGP", "Amount_USD"]);
 
-// Tags (the note's @words, tags.js) come last, so the older columns keep their places.
+// Tags (the note's @words, tags.js) and Private come last, so the older columns keep their places.
+// Private: "Yes" for an entry only its person (and owners) can see, so a copy shared with anyone
+// else can be filtered first.
 const TX_HEADERS = ["Date", "Category", "Subcategory", "Description", "Amount", "Currency", "Amount_EGP",
-  "Amount_USD", "Who Paid", "Payment Method", "Month", "Year", RATE, "Tags"];
-const INCOME_HEADERS = ["Date", "Source", "Amount", "Currency", "Amount_EGP", "Amount_USD", "Who", "Received In", "Month", "Year", RATE, "Tags"];
+  "Amount_USD", "Who Paid", "Payment Method", "Month", "Year", RATE, "Tags", "Private"];
+const INCOME_HEADERS = ["Date", "Source", "Amount", "Currency", "Amount_EGP", "Amount_USD", "Who", "Received In", "Month", "Year", RATE, "Tags", "Private"];
 const tagsOf = (t) => [...new Map(tagsIn(t.description).map((x) => [x.key, x.name])).values()].join(", ");
+const privateOf = (t) => (t.private_to ? "Yes" : "");
 
 // Excel serial day number, computed in UTC so no time zone can shift the date.
 function excelDate(iso) {
@@ -57,6 +60,7 @@ export async function exportToExcel() {
     ...monthYear(t.occurred_on),
     Number(t.rate),
     tagsOf(t),
+    privateOf(t),
   ]);
 
   const income = rows.filter((t) => t.type === "income").map((t) => [
@@ -68,6 +72,7 @@ export async function exportToExcel() {
     ...monthYear(t.occurred_on),
     Number(t.rate),
     tagsOf(t),
+    privateOf(t),
   ]);
 
   const wb = XLSX.utils.book_new();
