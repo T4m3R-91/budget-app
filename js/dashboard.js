@@ -386,7 +386,7 @@ function paintTreemap() {
   const picked = tiles.find((t) => t.key === treemap.picked);
   $("d-cat-detail").replaceChildren(picked
     ? el("span", {}, el("strong", { text: tileSummary(picked) }),
-        picked.parts ? `: ${picked.parts.map((p) => `${p.icon} ${p.name} ${money(p.amount)} (${share(p.amount, total)})`).join(" · ")}` : "")
+        picked.parts ? picked.parts.map((p) => el("div", { text: `${p.icon} ${p.name} · ${money(p.amount)} · ${share(p.amount, total)}` })) : [])
     : el("span", { class: "muted", text: "Tap a tile for its figures." }));
 }
 
