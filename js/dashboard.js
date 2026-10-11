@@ -2,7 +2,7 @@
 // every total and chart; EGP/USD switches between each entry's frozen converted amounts.
 
 import { state, byId } from "./state.js";
-import { el, fmtMoney, friendlyError, loadScript, isoLocal, parseISODate } from "./ui.js";
+import { el, fmtMoney, fmtPct, friendlyError, loadScript, isoLocal, parseISODate, amountsHidden, MASK } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
 import { filters, mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 
@@ -150,6 +150,7 @@ function renderKpis(expenses, income) {
 
 // Axis labels stay short ("EGP 12k", "USD 1.5k"); tooltips and KPIs show full figures.
 function compact(v) {
+  if (amountsHidden()) return `${view.currency} ${MASK}`;
   const a = Math.abs(v);
   const s = a >= 1e6 ? `${+(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${+(a / 1e3).toFixed(1)}k` : String(Math.round(a));
   return `${v < 0 ? "−" : ""}${view.currency} ${s}`;
@@ -390,7 +391,7 @@ function paintTreemap() {
     : el("span", { class: "muted", text: "Tap a tile for its figures." }));
 }
 
-const share = (part, total) => { const p = (part / total) * 100; return p > 0 && p < 1 ? "<1%" : `${Math.round(p)}%`; };
+const share = (part, total) => { const p = (part / total) * 100; return fmtPct(p > 0 && p < 1 ? "<1%" : `${Math.round(p)}%`); };
 const tileSummary = (t) => `${`${t.icon} ${t.name}`.trim()} · ${money(t.amount)} · ${share(t.amount, treemap.total)}`;
 
 // Squarified treemap (Bruls, Huizing & van Wijk): fills the box row by row, adding a tile to
