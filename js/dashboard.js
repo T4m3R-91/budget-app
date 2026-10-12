@@ -144,8 +144,8 @@ function renderKpis(expenses, income) {
   const spend = expenses.reduce((s, r) => s + amount(r), 0);
   const inc = income.reduce((s, r) => s + amount(r), 0);
   const net = inc - spend;
-  $("d-kpi-spend").textContent = money(spend);
-  $("d-kpi-income").textContent = money(inc);
+  $("d-kpi-spend").textContent = (spend > 0 ? "-" : "") + money(spend);
+  $("d-kpi-income").textContent = (inc > 0 ? "+" : "") + money(inc);
   const netEl = $("d-kpi-net");
   netEl.textContent = (net > 0 ? "+" : "") + money(net);
   netEl.className = "num " + (net >= 0 ? "pos" : "neg");
