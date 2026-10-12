@@ -183,10 +183,10 @@ async function paintPush() {
     on = pushBusy ? pushBusy === "on" : now === "on";
     if (pushBusy) hint = pushBusy === "on" ? "Turning on…" : "Turning off…";
     else if (now === "blocked") hint = blockedHelp();
-    toggle = switchEl(on, "Notifications on this device", () => flipPush(on), Boolean(pushBusy) || now === "blocked");
+    toggle = switchEl(on, "Allow notifications on this device", () => flipPush(on), Boolean(pushBusy) || now === "blocked");
   }
   document.getElementById("push-box")?.replaceChildren(
-    row("On this device", hint, toggle),
+    row("Allow on this device", hint, toggle),
     ...(on ? [disclosure("notif-settings", rowText("Notification settings"), ...prefRows()), buttonRow(testButton())] : []),
     ...(isIOS() ? quickRows() : []));
 }
@@ -250,8 +250,8 @@ function prefRows() {
     row("Send budget reminders",
       prefs.reminders ? ["Every day at ", hour] : `Every day at ${hourLabel(prefs.reminder_hour)}`,
       switchEl(prefs.reminders, "Send budget reminders", () => setPref({ reminders: !prefs.reminders }))),
-    row("Partner activity", "When partner(s) add or change an entry",
-      switchEl(prefs.partner_activity, "Partner activity", () => setPref({ partner_activity: !prefs.partner_activity }))),
+    row("Send partner activity", "When partner(s) add or change an entry",
+      switchEl(prefs.partner_activity, "Send partner activity", () => setPref({ partner_activity: !prefs.partner_activity }))),
     // Applies to every notification (reminders and partner activity).
     row("Show amounts", "In notifications: 🏠 Rent · EGP 12,000",
       switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
@@ -426,12 +426,12 @@ function personRow(m) {
         el("div", { class: "li-name", text: me ? `${m.display_name} (you)` : m.display_name }),
         el("div", { class: "muted small hh-email", text: m.email })),
       el("span", { class: `badge hh-${status.toLowerCase()}`, text: status }),
-      isOwner() && !me
-        ? el("button", {
+      !isOwner() ? null
+        : me ? el("span", { class: "hh-spacer", "aria-hidden": "true" }) // keeps your pill in line with the others'
+        : el("button", {
             type: "button", class: "icon-btn", text: "⋯", "aria-label": `Options for ${m.display_name}`, "aria-expanded": String(open),
             onclick: () => { menuFor = open ? null : m.email; armed = null; paintHousehold(); },
-          })
-        : null),
+          })),
     open ? personMenu(m) : null);
 }
 

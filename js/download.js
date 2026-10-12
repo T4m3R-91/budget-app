@@ -5,7 +5,7 @@ import { fetchBackupStatus } from "./db.js";
 import { exportToExcel } from "./export.js";
 
 export function downloadSection() {
-  const label = "Download transactions details as Excel file";
+  const label = "Download transactions details as Excel";
   const button = el("button", {
     type: "button", class: "btn secondary full", text: label,
     onclick: async () => {
