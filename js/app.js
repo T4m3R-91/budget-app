@@ -378,7 +378,9 @@ function startOfflineCopy() {
     if (event.data?.type === "pushed" && state.me) refreshInbox();
   });
   sw.register("sw.js").then((reg) => {
+    let ready = null; // the downloaded update, applied on its own once the app goes to the background
     const offer = (worker) => {
+      ready = worker;
       $("update-banner").replaceChildren("A new version is ready. ",
         el("button", { type: "button", class: "link-btn", text: "Reload", onclick: () => worker.postMessage("skip-waiting") }));
       $("update-banner").hidden = false;
@@ -388,7 +390,10 @@ function startOfflineCopy() {
       const worker = reg.installing;
       worker?.addEventListener("statechange", () => { if (worker.state === "installed" && sw.controller) offer(worker); });
     });
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) ready?.postMessage("skip-waiting"); // nobody is mid-entry: swap quietly, reloads on return
+      else reg.update().catch(() => {});
+    });
   }).catch(() => { /* unavailable (e.g. private browsing): the app still works online */ });
   sw.ready.then((reg) => {
     const urls = performance.getEntriesByType("resource").map((r) => r.name)
