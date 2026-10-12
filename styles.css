@@ -695,9 +695,15 @@ a.btn { display: inline-block; text-decoration: none; }
 .bud-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 
 /* Recurring card (Budget tab): every recurring item for the month, by due date. */
-.rec-list { list-style: none; margin: 0; padding: 0; }
-.rec-row { padding: 10px 0; border-top: 1px solid var(--line); }
-.rec-row:first-child { border-top: 0; padding-top: 2px; }
+.rec-filter { display: flex; margin-bottom: 8px; }
+.rec-filter button { flex: 1; padding-inline: 8px; }
+.rec-filter button.active.is-expense { background: var(--expense-fill); }
+.rec-filter button.active.is-income { background: var(--income); }
+.rec-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+/* Tinted like History's rows: red for an expense, green for income. */
+.rec-row { padding: 10px 12px; border-radius: 10px; }
+.rec-row.income { background: linear-gradient(var(--income-soft), var(--income-soft)), var(--panel); }
+.rec-row.expense { background: linear-gradient(var(--expense-soft), var(--expense-soft)), var(--panel); }
 .rec-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; min-height: 22px; }
 .rec-line .rec-actions { margin-left: auto; } /* if "Log on 28 Sep" doesn't fit beside the date, it moves under it, on the right */
 .rec-line + .rec-line { margin-top: 4px; }
@@ -715,7 +721,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .rec-row.overdue .rec-when { color: var(--expense); font-weight: 600; }
 .rec-row.due .rec-when { color: var(--text); font-weight: 600; }
 .rec-row.logged .rec-name, .rec-row.skipped .rec-name { color: var(--muted); }
-.rec-row.logged .rec-amt, .rec-row.skipped .rec-amt { color: var(--muted); font-weight: 400; }
+.rec-row.skipped .rec-amt { color: var(--muted); font-weight: 400; }
 .rec-row.skipped .rec-amt { text-decoration: line-through; }
 .rec-actions { display: flex; gap: 6px; }
 .rec-actions .btn, .rec-menu .btn { padding: 6px 12px; }

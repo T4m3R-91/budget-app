@@ -332,6 +332,17 @@ function showSpotlight(box) {
   if (row) spotlight(row);
 }
 
+const KINDS = [["all", "All"], ["expense", "Expenses"], ["income", "Income"]];
+let kind = "all"; // which scheduled payments the card shows
+
+// A row's amount in EGP (as shown: what was logged, else the item's), to order rows by size.
+function egpAmount({ item, due }) {
+  const h = data.handled.get(key(item.id, due));
+  const shown = h?.amount != null ? h : item;
+  const amount = Number(shown.amount);
+  return shown.currency === "USD" ? amount * (data.rate || 1) : amount;
+}
+
 function cardBody(month) {
   if (data.status === "idle") return [el("p", { class: "muted small", text: "Loading…" })];
   if (data.status === "missing") return [el("p", { class: "muted small", text: NOT_SET_UP })];
@@ -350,14 +361,23 @@ function cardBody(month) {
     ? data.items.flatMap((item) => occurrencesThrough(item, addMonths(thisMonth, -1))
         .filter((due) => !data.handled.has(key(item.id, due))).map((due) => ({ item, due })))
     : [];
-  const rows = [
-    ...earlier.sort((a, b) => a.due.localeCompare(b.due)),
-    ...data.items.map((item) => ({ item, due: dueIn(item, month) })).filter((o) => o.due).sort((a, b) => a.due.localeCompare(b.due)),
-  ];
-  if (!rows.length) return [el("p", { class: "muted small", text: `Nothing scheduled in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}.` })];
+  // Earliest date first; the biggest amount first among payments on the same date.
+  const all = [
+    ...earlier,
+    ...data.items.map((item) => ({ item, due: dueIn(item, month) })).filter((o) => o.due),
+  ].sort((a, b) => a.due.localeCompare(b.due) || egpAmount(b) - egpAmount(a));
+  const rows = kind === "all" ? all : all.filter((o) => o.item.type === kind);
+  const toggle = el("div", { class: "seg small rec-filter", role: "group", "aria-label": "Show" },
+    KINDS.map(([value, label]) => el("button", {
+      type: "button", class: kind === value ? `active${value === "all" ? "" : ` is-${value}`}` : "", "aria-pressed": String(kind === value), text: label,
+      onclick: () => { kind = value; paintRecurring(); },
+    })));
+  if (!all.length) return [el("p", { class: "muted small", text: `Nothing scheduled in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}.` })];
+  if (!rows.length) return [toggle, el("p", { class: "muted small", text: `No ${kind} scheduled in ${MONTH_NAMES[Number(month.slice(5, 7)) - 1]}.` })];
 
   const open = rows.filter((o) => ["overdue", "due", "later"].includes(statusOf(o.item, o.due, today)));
   return [
+    toggle,
     el("ul", { class: "rec-list" }, rows.map((o) => rowEl(o, today))),
     open.length
       ? el("p", { class: "rec-left" },
