@@ -1,45 +1,72 @@
-// The Settings card in Profile, collapsed until opened: hide amounts, Day/Night theme and the household's lists
-// (add / rename / reorder / hide). Items are hidden rather than deleted so past entries keep
-// their category names.
+// Profile's Display card (hide amounts, Day/Night theme) and Lists card: the household's lists
+// (add / rename / reorder / hide), each opening in place from its row. Items are hidden rather
+// than deleted so past entries keep their category names.
 
 import { state, subcategoriesOf } from "./state.js";
 import { el, toast, friendlyError, themeChoice, setThemeChoice, amountsHidden, setAmountsHidden } from "./ui.js";
 import { reloadLists, insertListItem, updateListItem } from "./db.js";
+import { card, row, rowText, switchEl, disclosure, openRow } from "./rows.js";
+
+const LISTS = [
+  { key: "categories", title: "Expense categories", table: "categories", items: () => state.categories, withIcon: true, nested: true },
+  { key: "income_sources", title: "Income sources", table: "income_sources", items: () => state.incomeSources, withIcon: true },
+  { key: "payment_methods", title: "Payment methods", table: "payment_methods", items: () => state.paymentMethods },
+  // The income "In" choices, once receiving-methods-migration.sql has run.
+  { key: "receiving_methods", title: "Receiving methods", table: "receiving_methods", items: () => state.receivingMethods, only: () => state.receivingMethods },
+];
 
 const expanded = new Set(); // categories whose subcategory list is open
 let editing = null; // "table:id" of the row being renamed
-let open = false; // the card starts collapsed; it stays as you left it while the app is open
-let card = null;
+let lists = null;
 
-// Opens the card next time Profile is drawn (an activity-log line about the lists leads here).
+// Opens the lists next time Profile is drawn (an activity-log line about the lists leads here).
 export function openSettings() {
-  open = true;
+  for (const { key } of LISTS) openRow(`list:${key}`);
 }
 
-export function settingsCard() {
+// ---------- display ----------
+
+let display = null;
+
+export function displayCard() {
+  display = card();
+  renderDisplay();
+  return display;
+}
+
+// Hide amounts is for showing the screen to someone: money and percentages turn into •••• everywhere
+// in the app (ui.js). Saved on this device only; exports aren't affected. Push notifications have
+// their own "Show amounts" switch (Profile → Notifications).
+function renderDisplay() {
+  const hidden = amountsHidden();
+  const choice = themeChoice();
+  display.replaceChildren(
+    el("div", { class: "pf-row pf-stack" },
+      rowText("Appearance"),
+      el("div", { class: "seg small theme-seg", role: "group", "aria-label": "Theme" },
+        [["auto", "🕒 Auto"], ["light", "☀️ Day"], ["dark", "🌙 Night"]].map(([key, label]) =>
+          el("button", {
+            type: "button", class: choice === key ? "active" : "", "aria-pressed": String(choice === key), text: label,
+            onclick: () => { setThemeChoice(key); renderDisplay(); },
+          })))),
+    row("Hide amounts", "Show •••• instead of amounts and percentages, for showing your screen",
+      switchEl(hidden, "Hide amounts", () => { setAmountsHidden(!hidden); renderDisplay(); })));
+}
+
+// ---------- lists ----------
+
+export function listsCard() {
   editing = null;
-  card = el("section", { class: "set-section settings-card" });
+  lists = card();
+  lists.classList.add("settings-card");
   render();
-  return card;
+  return lists;
 }
 
 function render() {
-  card.replaceChildren(
-    el("h3", { class: "collapse-head" },
-      el("button", {
-        type: "button", "aria-expanded": String(open), onclick: () => { open = !open; render(); },
-      }, el("span", { text: "Settings" }), el("span", { class: "chev", "aria-hidden": "true", text: "▸" }))),
-    ...(open
-      ? [
-          privacySection(),
-          appearanceSection(),
-          listSection({ title: "Categories", table: "categories", items: state.categories, withIcon: true, nested: true }),
-          listSection({ title: "Payment methods", table: "payment_methods", items: state.paymentMethods }),
-          // The income "In" choices, once receiving-methods-migration.sql has run.
-          state.receivingMethods ? listSection({ title: "Receiving methods", table: "receiving_methods", items: state.receivingMethods }) : null,
-          listSection({ title: "Income sources", table: "income_sources", items: state.incomeSources, withIcon: true }),
-        ].filter(Boolean)
-      : []));
+  lists.replaceChildren(...LISTS.filter((l) => !l.only || l.only()).map((l) =>
+    disclosure(`list:${l.key}`, rowText(l.title),
+      el("div", { class: "pf-pad" }, listBody({ table: l.table, items: l.items(), withIcon: l.withIcon, nested: l.nested })))));
   document.getElementById("rename-input")?.focus();
 }
 
@@ -55,51 +82,14 @@ async function change(fn, success) {
   render();
 }
 
-// ---------- hide amounts ----------
-
-// For showing the screen to someone: money and percentages turn into •••• everywhere in the app
-// (ui.js). Saved on this device only. Push notifications have their own "Show amounts" switch
-// (Profile → Notifications); exports aren't affected. Same switch and row as the notification ones.
-function privacySection() {
-  const hidden = amountsHidden();
-  return el("section", { class: "set-section" },
-    el("div", { class: "push-row" },
-      el("div", { class: "push-text" },
-        el("span", { class: "push-title", text: "Hide amounts" }),
-        el("span", { class: "muted small", text: hidden ? "On. Amounts and percentages show as •••• on this device." : "Off. Turn on to hide amounts and percentages, for showing your screen." })),
-      el("button", {
-        type: "button", class: "switch", role: "switch", "aria-checked": String(hidden), "aria-label": "Hide amounts",
-        onclick: () => { setAmountsHidden(!hidden); render(); },
-      })));
-}
-
-// ---------- appearance ----------
-
-function appearanceSection() {
-  const choice = themeChoice();
-  return el("section", { class: "set-section" },
-    el("h3", { text: "Appearance" }),
-    el("div", { class: "seg small theme-seg", role: "group", "aria-label": "Theme" },
-      [["auto", "🕒 Auto"], ["light", "☀️ Day"], ["dark", "🌙 Night"]].map(([key, label]) =>
-        el("button", {
-          type: "button", class: choice === key ? "active" : "", "aria-pressed": String(choice === key), text: label,
-          onclick: () => { setThemeChoice(key); render(); },
-        }))));
-}
-
-// ---------- list editors ----------
-
-function listSection({ title, table, items, withIcon = false, nested = false, parent = null }) {
+function listBody({ table, items, withIcon = false, nested = false, parent = null }) {
   const rows = items.map((item, i) => itemRow({ item, i, items, table, withIcon, nested }));
   const body = [
+    parent ? null : el("p", { class: "pf-hint", text: "Hidden items stay on past entries but disappear from the Add screen" }),
     el("div", { class: "li-list" }, rows.length ? rows : el("p", { class: "muted small", text: "Nothing here yet." })),
     addForm({ table, items, withIcon, parent }),
   ];
-  if (parent) return el("div", { class: "sub-editor" }, body);
-  return el("section", { class: "set-section" },
-    el("h3", { text: title }),
-    el("p", { class: "note", text: "Hidden items stay on past entries but disappear from the Add screen." }),
-    body);
+  return parent ? el("div", { class: "sub-editor" }, body) : body;
 }
 
 function itemRow({ item, i, items, table, withIcon, nested }) {
@@ -129,7 +119,7 @@ function itemRow({ item, i, items, table, withIcon, nested }) {
       })));
 
   if (!open) return row;
-  return el("div", {}, row, listSection({ table: "subcategories", items: subs, parent: item }));
+  return el("div", {}, row, listBody({ table: "subcategories", items: subs, parent: item }));
 }
 
 function renameForm({ item, table, withIcon }) {

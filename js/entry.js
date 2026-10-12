@@ -633,7 +633,7 @@ function renderGrid() {
   if (!items.length) {
     grid.replaceChildren(el("p", {
       class: "empty-note",
-      text: isIncome ? "No income sources yet. Add some in Profile → Settings." : "No categories yet. Add some in Profile → Settings.",
+      text: isIncome ? "No income sources yet. Add some in Profile → Lists." : "No categories yet. Add some in Profile → Lists.",
     }));
     return;
   }

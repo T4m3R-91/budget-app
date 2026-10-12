@@ -4,6 +4,7 @@
 import { state, byId } from "./state.js";
 import { el, fmtMoney, fmtPct, friendlyError, loadScript, isoLocal, parseISODate, amountsHidden, MASK } from "./ui.js";
 import { fetchAllTransactions } from "./db.js";
+import { downloadSection, paintBackupLine } from "./download.js";
 import { filters, mountFilterBar, setFilterOptions, matchesFilters, onFiltersChange } from "./filters.js";
 
 export const CHART_JS = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
@@ -28,6 +29,7 @@ export async function showDashboard() {
   view.currency = state.displayCurrency; // the EGP/USD switch is shared with the Budget tab
   renderCurrencySeg();
   setStatus("Loading…");
+  paintBackupLine();
   try {
     const [txns] = await Promise.all([fetchAllTransactions(), loadScript(CHART_JS)]);
     view.rows = txns.map(enrich);
@@ -88,7 +90,8 @@ function build() {
         el("div", { class: "card-head" },
           el("h3", { text: "Cash flow" }),
           el("div", { id: "d-range", class: "seg small", role: "group", "aria-label": "Chart range" })),
-        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Cash flow chart: income, spend and cumulative net", role: "img" }))))
+        el("div", { class: "chart-box", id: "d-trend-box" }, el("canvas", { id: "d-trend", "aria-label": "Cash flow chart: income, spend and cumulative net", role: "img" })))),
+    downloadSection()
   );
   renderCurrencySeg();
   renderRangeSeg();

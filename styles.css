@@ -395,13 +395,7 @@ a.btn { display: inline-block; text-decoration: none; }
    form always has room above it. */
 .tag { color: var(--accent); font-weight: 600; }
 /* Profile → Notifications → Apple Pay quick-add: the one-time setup steps, until the first payment. */
-.quick-setup { margin: 4px 0 12px; padding: 12px 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 13.5px; line-height: 1.5; }
-.quick-setup .quick-head { margin: 0 0 6px; font-weight: 600; }
-.quick-setup ol { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 6px; }
-.quick-setup ul { margin: 4px 0 0; padding-left: 16px; }
-.quick-setup li .btn { margin: 4px 6px 2px 0; }
-.quick-link { display: block; margin: 4px 0 2px; color: var(--muted); font-size: 11.5px; word-break: break-all; user-select: all; -webkit-user-select: all; }
-.quick-setup > p:last-child { margin: 0; }
+.quick-link { display: block; margin: 2px 0; color: var(--muted); font-size: 11.5px; word-break: break-all; user-select: all; -webkit-user-select: all; }
 .note-wrap { position: relative; margin-top: 10px; }
 .note-wrap .note-input { margin-top: 0; }
 .tag-suggest {
@@ -757,19 +751,47 @@ a.btn { display: inline-block; text-decoration: none; }
 
 /* ---------- settings ---------- */
 .screen-title { margin-bottom: 14px; }
-.set-section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
-.set-section h3 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-.set-section .note { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
-/* Profile's Settings card: collapsed until its title row is tapped; the sections inside are
-   separated by dividers rather than drawn as cards within a card. */
-.set-section .collapse-head { margin: 0; }
-.collapse-head button {
-  display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 24px;
-  padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit;
-}
-.collapse-head .chev { font-size: 13px; transition: transform 0.15s ease; }
-.collapse-head button[aria-expanded="true"] .chev { transform: rotate(90deg); }
-.settings-card .set-section { margin: 14px 0 0; padding: 14px 0 0; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+/* Profile: a small label above a card, the card a stack of rows (rows.js), as iPhone Settings does it.
+   A row is a title, an optional hint and a switch, button or chevron at the right; the ones with a
+   chevron open in place, on the same background and at the same level. No lines between rows. */
+.pf-group { margin-bottom: 18px; }
+.pf-label { margin: 0 6px 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.pf-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.pf-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; min-height: 52px; }
+.pf-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.pf-text > b { font-weight: 600; }
+.pf-hint { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.pf-big { font-size: 22px; font-variant-numeric: tabular-nums; }
+.pf-card .pf-pad { padding: 0 14px 12px; margin: 0; } /* (beats .inline-form's own padding, which had the password form touching both edges) */
+summary.pf-row { list-style: none; cursor: pointer; }
+summary.pf-row::-webkit-details-marker { display: none; }
+.pf-chev { flex: none; font-size: 20px; line-height: 1; color: var(--muted); transition: transform 0.15s ease; }
+details[open] > summary .pf-chev { transform: rotate(90deg); }
+.pf-tap { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pf-btn-row { padding-block: 8px; }
+/* A button row right after an opened-or-closed row (Notification settings → test, Change password → Sign out) gets a line above it. */
+.pf-btn-row { position: relative; }
+.pf-disc + .pf-btn-row::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--line); }
+/* A line between the members and "Invite someone" (or its form), inset like the Lists rows'. */
+.pf-body > .pf-tap, .pf-body > .hh-invite { position: relative; }
+.pf-body > .pf-tap::before, .pf-body > .hh-invite::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--line); }
+.pf-body > .hh-invite { padding-top: 12px; }
+.pf-stack { flex-direction: column; align-items: stretch; gap: 8px; }
+.btn.danger.tint { background: color-mix(in srgb, var(--critical) 12%, var(--panel)); }
+.pf-head { display: flex; align-items: center; gap: 12px; padding: 4px 6px 18px; }
+.pf-head .inline-form { flex: 1; padding: 0; }
+.pf-avatar { flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+.pf-who { flex: 1; min-width: 0; }
+.pf-name-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 16px; }
+.pf-name-row .link-btn { flex: none; padding: 0 2px; font-size: 14px; }
+.pf-mail { display: block; overflow-wrap: anywhere; }
+.pf-steps ol { margin: 0; padding: 0 14px 4px 38px; display: grid; gap: 8px; font-size: 13.5px; line-height: 1.5; }
+.pf-steps ul { margin: 4px 0 0; padding-left: 16px; }
+/* An opened list ends with a line under its "Add new…" field, so it's set apart from the next
+   list; collapsed lists have none. */
+.settings-card > .pf-disc[open]:not(:last-child) > .pf-body::after { content: ""; display: block; height: 1px; margin: 0 14px; background: var(--line); }
+.pf-card .lb-row { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
+.pf-card .li-row { border-top: 0; }
 .theme-seg { display: flex; }
 .theme-seg button { flex: 1; }
 .li-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -788,8 +810,6 @@ a.btn { display: inline-block; text-decoration: none; }
 .inline-form .text-input { flex: 1; min-width: 0; padding: 9px 10px; }
 .inline-form .icon-input { flex: 0 0 56px; text-align: center; }
 .li-row.editing { flex-wrap: wrap; }
-.acct { margin: 0 0 12px; }
-.acct-rename { margin-left: 4px; padding: 0 4px; }
 
 /* Profile → Household: each person with their status; an owner's ⋯ opens their actions. */
 .hh-person .li-name { font-weight: 600; }
@@ -800,36 +820,22 @@ a.btn { display: inline-block; text-decoration: none; }
 .hh-menu { padding: 2px 0 10px; }
 .hh-menu .muted { margin: 8px 0 0; }
 .hh-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.hh-note { margin: 10px 0 0; }
-.hh-invite-btn { margin-top: 10px; }
-.hh-invite { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.hh-invite { display: grid; gap: 8px; }
 .hh-invite .muted { margin: 0; }
 
-/* Points (Profile): your total, then the household leaderboard. */
-.points-total {
-  display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;
-  padding: 10px 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
-}
-.points-total strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+/* Points (Profile): your total, which opens to the household leaderboard. */
 .lb-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
 .lb-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .lb-list { list-style: none; margin: 0; padding: 0; }
-.lb-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 6px; padding: 9px 2px; border-top: 1px solid var(--line); }
-.lb-row:first-child { border-top: 0; }
+.lb-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 6px; padding: 9px 2px; }
 .lb-star { font-size: 16px; text-align: center; }
 .lb-pts { color: var(--muted); font-variant-numeric: tabular-nums; }
 .lb-row.leader .lb-name, .lb-row.leader .lb-pts { color: var(--text); font-weight: 600; }
-/* Notifications (Profile): this device's switch, your reminder settings (divided rows), then the
-   test button. */
-.push-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.push-row + .push-row { padding-top: 12px; border-top: 1px solid var(--line); }
-.push-note { margin: -4px 0 12px; }
+/* Notifications (Profile): the reminder time picker inside its hint. */
 .hour-select {
   margin-left: 2px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--panel2); color: var(--text); font-family: inherit; font-size: 16px; font-weight: 600;
 }
-.push-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.push-title { font-weight: 600; }
 .switch {
   position: relative; flex: 0 0 auto; width: 51px; height: 31px; padding: 0;
   border: 0; border-radius: 16px; background: var(--faint); transition: background 0.2s;
@@ -843,8 +849,9 @@ a.btn { display: inline-block; text-decoration: none; }
 .switch:disabled { opacity: 0.5; }
 .stack { display: grid; gap: 10px; }
 .app-version { text-align: center; color: var(--faint); font-size: 12px; }
-/* Profile → Download: when the nightly backup last ran; orange when it's late. */
-.backup-line { margin: 10px 0 0; text-align: center; }
+/* Dashboard foot: the Excel download, and when the nightly backup last ran (orange when it's late). */
+.dash-data { display: grid; gap: 10px; margin-top: 18px; }
+.backup-line { margin: 0; text-align: center; color: var(--faint); font-size: 12px; }
 .backup-line.stale { color: var(--warn); }
 
 /* ---------- tab bar & toast ---------- */
