@@ -324,7 +324,9 @@ function outlookLines(o, inUsd) {
   else {
     const diff = o.forecast - o.total;
     const by = compactReal(Math.abs(diff)) === "0" ? "on budget" : `${compact(Math.abs(diff))} ${diff > 0 ? "over" : "under"}`;
-    forecast = el("div", { class: `fc${diff > 0 && by !== "on budget" ? " over" : ""}`, text: `At this pace: EGP ${compact(o.forecast)} of ${compact(o.total)} (${by})` });
+    forecast = el("div", { class: `fc${diff > 0 && by !== "on budget" ? " over" : ""}` },
+      el("div", { text: "Expected spending by month end, at this pace:" }),
+      el("div", { text: `EGP ${compact(o.forecast)} of ${compact(o.total)} (${by})` }));
   }
   return el("div", { class: "bud-outlook" }, el("div", { class: "k", text: "Safe to spend" }), safe, forecast);
 }

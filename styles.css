@@ -621,7 +621,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .kpi .num { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .kpi.spend .num { color: var(--expense); }
 .kpi.income .num { color: var(--income); }
-.kpi .num.pos { color: var(--good); }
+.kpi .num.pos { color: var(--income); } /* surplus Net: the same green as Total income and the Income tab */
 .kpi .num.neg { color: var(--critical); }
 @media (max-width: 560px) {
   .kpis { grid-template-columns: 1fr; gap: 8px; }
