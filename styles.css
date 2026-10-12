@@ -769,9 +769,10 @@ summary.pf-row::-webkit-details-marker { display: none; }
 details[open] > summary .pf-chev { transform: rotate(90deg); }
 .pf-tap { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .pf-btn-row { padding-block: 8px; }
-/* A button row right after an opened-or-closed row (Notification settings → test, Change password → Sign out) gets a line above it. */
+/* Sign out gets a line above it, under Change password (open or closed); the Notifications test button doesn't. */
 .pf-btn-row { position: relative; }
-.pf-disc + .pf-btn-row::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--line); }
+#push-box > .pf-btn-row:not(:last-child)::after { content: ""; position: absolute; bottom: 0; left: 14px; right: 14px; height: 1px; background: var(--line); } /* under the test button, when Apple Pay follows */
+.pf-card:not(#push-box) > .pf-disc + .pf-btn-row::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--line); }
 /* A line between the members and "Invite someone" (or its form), inset like the Lists rows'. */
 .pf-body > .pf-tap, .pf-body > .hh-invite { position: relative; }
 .pf-body > .pf-tap::before, .pf-body > .hh-invite::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--line); }
@@ -815,6 +816,8 @@ details[open] > summary .pf-chev { transform: rotate(90deg); }
 .hh-person .li-name { font-weight: 600; }
 .hh-email { overflow-wrap: anywhere; }
 .hh-person.is-former .li-name, .hh-person.is-former .hh-email { opacity: 0.55; }
+.hh-person .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 76px; height: 34px; padding: 0 10px; margin-left: 0; font-size: 12.5px; border-radius: 8px; } /* as tall as the ⋯ button beside it, and as wide for every status */
+.hh-spacer { flex: none; width: 34px; } /* where your own row has no ⋯ button */
 .badge.hh-owner { color: var(--accent); border-color: var(--accent); }
 .badge.hh-invited { color: var(--warn); border-color: var(--warn); }
 .hh-menu { padding: 2px 0 10px; }
