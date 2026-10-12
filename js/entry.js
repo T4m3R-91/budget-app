@@ -127,6 +127,8 @@ export async function showRecurringEdit(itemId) {
 // currency, "raw", goes in the note to fill in by hand), the merchant as the note, and the category,
 // subcategory and payment method of your last entry with that merchant (so changing them once
 // teaches it), or else a payment method named like the card ("Credit Card" for a credit card).
+// With a merchant it hasn't seen there's no category to fill in, so the form scrolls to the
+// categories and glows them, the way Save does when one is missing.
 export async function showQuick(params) {
   const amount = Number(params.get("a"));
   const merchant = params.get("m") || "";
@@ -152,6 +154,7 @@ export async function showQuick(params) {
     form.paymentMethodId = methodForCard(card) ?? form.paymentMethodId;
   }
   render();
+  if (!form.categoryId) flag(["grid"]); // a merchant it hasn't seen: take you to the categories, the one thing left to pick
 }
 
 // "Carrefour Heliopolis @dahab-trip" is the same merchant as "Carrefour Heliopolis", and so is a
