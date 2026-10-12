@@ -371,10 +371,37 @@ export async function deleteActivity(id) {
 // "entry", "repeat" (an entry set to repeat), "log" (a scheduled payment logged) with the entry's
 // id, "scheduled" with the scheduled payment's id. Changes, with what it was before (extra):
 // "edit" ({ before }), "edit_scheduled" ({ before, from }), "skip" / "unskip" ({ due }), "budget"
-// (id: the month; { before: [{ category_id, amount_egp }] }). Deletes aren't announced. Nothing
+// (id: the month; { before: [{ category_id, amount_egp }] }). "comment" with a comment's id: a
+// comment or reply on an entry (addComment). Deletes aren't announced. Nothing
 // waits for it, and nothing is said if it fails (offline, or the function isn't updated yet).
 export function notifyActivity(kind, id, extra = {}) {
   sb.functions.invoke("notify", { body: { action: "activity", kind, id, ...extra } }).catch(() => {});
+}
+
+// ---------- comments on entries (comments-migration.sql) ----------
+
+// Every comment and reply on the entries you can see, oldest first; "missing" before the migration.
+export async function fetchComments() {
+  try {
+    return await cached("comments", () => allPages(() => sb.from("entry_comments").select("*").order("created_at").order("id")));
+  } catch (e) {
+    if (isMissingTable(e)) return "missing";
+    throw e;
+  }
+}
+
+// A comment on an entry, or a reply to one (parentId); then the notify function tells the others.
+export async function addComment(entryId, body, parentId = null) {
+  const row = unwrap(await sb.from("entry_comments").insert({ entry_id: entryId, parent_id: parentId, body }).select().single());
+  notifyActivity("comment", row.id);
+  return row;
+}
+
+// Authors delete their own, owners anyone's (and a comment's replies go with it). Anything else is
+// refused by the database's rule (nothing removed, no error), so that's an error here.
+export async function deleteComment(id) {
+  const removed = unwrap(await sb.from("entry_comments").delete().eq("id", id).select("id"));
+  if (!removed.length) throw new Error("Only its author or an owner can delete a comment.");
 }
 
 // What an entry or scheduled payment was before an edit, for the others' "EGP 450 → EGP 520".
