@@ -409,12 +409,17 @@ function rowEl({ item, due }, today) {
   const source = income ? byId(state.incomeSources, item.income_source_id) : byId(state.categories, item.category_id);
   const every = repeats(item) ? `↻ ${item.frequency === "yearly" ? "Yearly" : "Monthly"}` : null;
   const details = [byId(state.subcategories, item.subcategory_id)?.name, item.description, every].filter(Boolean).join(" · ");
-  return el("li", { class: `rec-row ${status} ${income ? "income" : "expense"}`, "data-item": item.id },
+  // Tapping the card itself opens or closes its Edit / Remove menu; its own buttons, links and
+  // date field do their own thing.
+  const toggleMenu = () => { menuFor = menuFor === k ? null : k; stopArmed = null; paintRecurring(); };
+  return el("li", {
+    class: `rec-row ${status} ${income ? "income" : "expense"}`, "data-item": item.id,
+    tabindex: "0", role: "group", "aria-expanded": String(menuFor === k),
+    onclick: (e) => { if (!e.target.closest("button, a, input, label")) toggleMenu(); },
+    onkeydown: (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleMenu(); } },
+  },
     el("div", { class: "rec-line" },
-      el("button", {
-        type: "button", class: "rec-name", "aria-expanded": String(menuFor === k),
-        onclick: () => { menuFor = menuFor === k ? null : k; stopArmed = null; paintRecurring(); },
-      }, el("span", { text: `${item.private_to ? "🔒 " : ""}${source?.icon || "•"} ${source?.name || "Unknown"}` }), el("span", { class: "rec-more", "aria-hidden": "true", text: "▾" })),
+      el("span", { class: "rec-name", text: `${item.private_to ? "🔒 " : ""}${source?.icon || "•"} ${source?.name || "Unknown"}` }),
       el("span", { class: "rec-amt", text: amount })),
     details ? el("div", { class: "rec-details", text: details }) : null,
     el("div", { class: "rec-line" },

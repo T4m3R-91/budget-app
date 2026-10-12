@@ -702,18 +702,13 @@ a.btn { display: inline-block; text-decoration: none; }
 .rec-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .rec-row { min-width: 0; }
 /* Tinted like History's rows: red for an expense, green for income. */
-.rec-row { padding: 10px 12px; border-radius: 10px; }
+.rec-row { padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); cursor: pointer; }
 .rec-row.income { background: linear-gradient(var(--income-soft), var(--income-soft)), var(--panel); }
 .rec-row.expense { background: linear-gradient(var(--expense-soft), var(--expense-soft)), var(--panel); }
 .rec-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; min-height: 22px; }
 .rec-line .rec-actions { margin-left: auto; } /* if "Log on 28 Sep" doesn't fit beside the date, it moves under it, on the right */
 .rec-line + .rec-line { margin-top: 4px; }
-.rec-name {
-  display: flex; align-items: baseline; gap: 6px; min-width: 0; padding: 0; border: 0; background: none;
-  color: var(--text); font-size: 14.5px; text-align: left;
-}
-.rec-name > span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rec-more { color: var(--muted); font-size: 11px; flex: none; } /* tap the name for Edit / Remove */
+.rec-name { min-width: 0; color: var(--text); font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rec-amt { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; text-decoration: none; }
 .rec-row.expense .rec-amt { color: var(--expense); }
 .rec-row.income .rec-amt { color: var(--income); }
