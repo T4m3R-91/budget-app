@@ -19,7 +19,7 @@ export function el(tag, props, ...children) {
   return node;
 }
 
-// ---------- hide amounts (saved on this device; set in Profile → Settings) ----------
+// ---------- hide amounts (saved on this device; set in Profile → Display) ----------
 
 // While on, every money figure and percentage is drawn as a fixed-length mask, so the real value
 // never reaches the screen, a tooltip or a label. Shapes (bars, tiles) are left as they are.

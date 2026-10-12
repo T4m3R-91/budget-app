@@ -1,19 +1,19 @@
-// Profile: your account (name, password, sign-out), the household (owners invite, deactivate and
-// change roles), your points and the household leaderboard, notifications on this device, the
-// Settings card (collapsed until opened), and the Excel download with when the last automatic
-// backup ran.
+// Profile, in groups of rows the way iPhone Settings lays them out: who you are, your points,
+// notifications on this device, the household (owners invite, deactivate and change roles),
+// display, the household's lists (settings.js), and your password and sign-out. Rows that need
+// room open in place (rows.js). The Excel download lives at the foot of the Dashboard tab.
 
 import { state, isActive, isOwner } from "./state.js";
-import { el, toast, friendlyError, friendlyDate, isoLocal } from "./ui.js";
+import { el, toast, friendlyError } from "./ui.js";
 import {
-  sb, reloadLists, fetchLeaderboard, fetchNotifySettings, saveNotifySettings, fetchBackupStatus,
+  sb, reloadLists, fetchLeaderboard, fetchNotifySettings, saveNotifySettings,
   inviteMember, cancelInvite, setMemberRole, setMemberActive, renameMe,
   fetchQuickAdd, quickAddOn, quickAddOff, quickAddLink,
 } from "./db.js";
-import { settingsCard } from "./settings.js";
-import { exportToExcel } from "./export.js";
+import { displayCard, listsCard } from "./settings.js";
 import { appVersion } from "./offline.js";
-import { support, deviceState, deviceName, isIOS, prepareKey, turnOn, turnOff, sendTest } from "./push.js";
+import { support, deviceState, isIOS, prepareKey, turnOn, turnOff, sendTest } from "./push.js";
+import { group, card, rowText, row, buttonRow, switchEl, disclosure, openRow } from "./rows.js";
 
 let board = { status: "loading", rows: [] }; // loading | ready | missing | error
 let period = "all_time"; // or "this_month"
@@ -24,12 +24,13 @@ const versionLine = () => `Household Budget${version ? ` ${version}` : ""}`;
 export function showProfile() {
   document.getElementById("screen-profile").replaceChildren(
     el("h2", { class: "screen-title", text: "Profile" }),
-    accountSection(),
+    headSection(),
+    group("Activity", pointsBox()),
+    group("Notifications", el("div", { id: "push-box", class: "pf-card" })),
     householdSection(),
-    el("section", { class: "set-section" }, el("h3", { text: "Points" }), pointsBox()),
-    el("section", { class: "set-section" }, el("h3", { text: "Notifications" }), el("div", { id: "push-box" })),
-    settingsCard(),
-    downloadSection(),
+    group("Display", displayCard()),
+    group("Lists", listsCard()),
+    accountSection(),
     el("p", { class: "app-version", id: "app-version", text: versionLine() }));
   loadBoard();
   paintPush();
@@ -43,54 +44,54 @@ export function showProfile() {
   });
 }
 
-// ---------- download ----------
+// ---------- you ----------
 
-function downloadSection() {
-  const button = el("button", {
-    type: "button", class: "btn secondary full", text: "Download Excel",
-    onclick: async () => {
-      button.disabled = true;
-      button.textContent = "Preparing file…";
-      try {
-        const counts = await exportToExcel();
-        toast(`Downloaded ${counts.expenses} expenses and ${counts.income} income entries`);
-      } catch (e) {
-        toast(friendlyError(e));
-      }
-      button.disabled = false;
-      button.textContent = "Download Excel";
-    },
-  });
-  const section = el("section", { class: "set-section" },
-    el("h3", { text: "Download" }),
-    el("p", { class: "note", text: "Downloads everything as an Excel file with Transactions and Income tabs, in the same layout as your spreadsheet." }),
-    button,
-    el("p", { id: "backup-line", class: "muted small backup-line", hidden: true }));
-  paintBackupLine();
-  return section;
+let renaming = false;
+const paintHead = () => document.getElementById("profile-head")?.replaceWith(headSection());
+
+// Your name as everyone sees it (you're the only one who can change it), with your email and role.
+function headSection() {
+  const me = state.me;
+  const canRename = "role" in me;
+  if (renaming) return el("div", { id: "profile-head", class: "pf-head" }, renameForm());
+  return el("div", { id: "profile-head", class: "pf-head" },
+    el("div", { class: "pf-avatar", "aria-hidden": "true", text: (me.display_name || "?").trim().charAt(0).toUpperCase() }),
+    el("div", { class: "pf-who" },
+      el("div", { class: "pf-name-row" },
+        el("strong", { text: me.display_name }),
+        canRename ? el("button", { type: "button", class: "link-btn", text: "Rename", onclick: () => { renaming = true; paintHead(); } }) : null),
+      el("span", { class: "muted small pf-mail", text: canRename ? `${me.email} · ${statusOf(me)}` : me.email })));
 }
 
-// The nightly automatic backup (backup-repo/): when it last ran. Nothing shown until
-// backups-migration.sql has run; a warning when it's more than a day and a half old.
-async function paintBackupLine() {
-  let status;
-  try { status = await fetchBackupStatus(); } catch { return; }
-  const line = document.getElementById("backup-line");
-  if (!line || status === "missing") return;
-  line.hidden = false;
-  if (!status) {
-    line.textContent = "Automatic backups: waiting for the first one.";
-    return;
-  }
-  const at = new Date(status.last_backup_at);
-  const day = isoLocal(at);
-  const when = friendlyDate(day).replace(/^Today$/, "today").replace(/^Yesterday$/, "yesterday");
-  const time = at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  const stale = Date.now() - at.getTime() > 36 * 3600 * 1000;
-  line.classList.toggle("stale", stale);
-  line.textContent = stale
-    ? `⚠ Last automatic backup: ${when}, ${time}. Check the backup repository on GitHub.`
-    : `Last automatic backup: ${when} ${time} ✓`;
+function renameForm() {
+  const input = el("input", { class: "text-input", maxlength: 40, value: state.me.display_name, "aria-label": "Your name" });
+  setTimeout(() => input.focus(), 0);
+  return el("form", {
+    class: "inline-form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return toast("Type a name.");
+      if (!navigator.onLine) return toast("Renaming needs a connection.");
+      try {
+        await renameMe(name);
+        await refreshPeople();
+        renaming = false;
+        toast("Name changed");
+        showProfile(); // the leaderboard and household list show it too
+      } catch (err) {
+        toast(friendlyError(err));
+      }
+    },
+  }, input,
+  el("button", { type: "submit", class: "btn small secondary", text: "Save" }),
+  el("button", { type: "button", class: "btn small secondary", text: "Cancel", onclick: () => { renaming = false; paintHead(); } }));
+}
+
+// The household's list again (after a change), and you in it.
+async function refreshPeople() {
+  await reloadLists();
+  state.me = state.members.find((m) => m.email === state.me.email) || state.me;
 }
 
 // ---------- points ----------
@@ -113,16 +114,15 @@ function paintPoints() {
   document.getElementById("points-box")?.replaceWith(pointsBox());
 }
 
-// Your all-time total, then the household ranked for the chosen period. The leader
+// Your all-time total; it opens to the household ranked for the chosen period. The leader
 // gets a star; ties share it, and nobody gets one while everyone is at zero.
 function pointsBox() {
-  const box = (...children) => el("div", { id: "points-box" }, children);
-  if (board.status === "loading") return box(el("p", { class: "muted small", text: "Loading points…" }));
-  if (board.status === "missing") {
-    return box(el("p", { class: "muted small", text: "Points aren't set up yet. Run points-migration.sql in Supabase to turn them on." }));
-  }
+  const box = (...children) => el("div", { id: "points-box", class: "pf-card" }, children);
+  const note = (...children) => el("p", { class: "muted small pf-pad" }, children);
+  if (board.status === "loading") return box(note("Loading points…"));
+  if (board.status === "missing") return box(note("Points aren't set up yet. Run points-migration.sql in Supabase to turn them on."));
   if (board.status === "error") {
-    return box(el("p", { class: "muted small" }, `Couldn't load points. ${board.message} `,
+    return box(note(`Couldn't load points. ${board.message} `,
       el("button", { type: "button", class: "link-btn", text: "Try again", onclick: loadBoard })));
   }
 
@@ -132,26 +132,27 @@ function pointsBox() {
   const ranked = board.rows.filter(current).sort((a, b) => b[period] - a[period] || a.display_name.localeCompare(b.display_name));
   const top = ranked[0]?.[period] || 0;
 
-  return box(
-    el("div", { class: "points-total" },
-      el("span", { class: "muted", text: "Your points" }),
-      el("strong", { text: fmtPoints(mine?.all_time) })),
-    el("div", { class: "lb-head" },
-      el("span", { class: "lb-title", text: "Leaderboard" }),
-      el("div", { class: "seg small", role: "group", "aria-label": "Leaderboard period" },
-        [["all_time", "All time"], ["this_month", "This month"]].map(([key, label]) =>
-          el("button", {
-            type: "button", class: period === key ? "active" : "", "aria-pressed": String(period === key), text: label,
-            onclick: () => { period = key; paintPoints(); },
-          })))),
-    el("ol", { class: "lb-list" },
-      ranked.map((r) => {
-        const leader = top > 0 && r[period] === top;
-        return el("li", { class: "lb-row" + (leader ? " leader" : "") },
-          el("span", { class: "lb-star", "aria-label": leader ? "Leader" : null, text: leader ? "⭐" : "" }),
-          el("span", { class: "lb-name", text: r.display_name + (r.email === state.me.email ? " (you)" : "") }),
-          el("span", { class: "lb-pts", text: `${fmtPoints(r[period])} pts` }));
-      })));
+  return box(disclosure("points",
+    el("div", { class: "pf-text" },
+      el("span", { class: "pf-hint", text: "Your points · All time" }),
+      el("strong", { class: "pf-big", text: fmtPoints(mine?.all_time) })),
+    el("div", { class: "pf-pad" },
+      el("div", { class: "lb-head" },
+        el("span", { class: "lb-title", text: "Leaderboard" }),
+        el("div", { class: "seg small", role: "group", "aria-label": "Leaderboard period" },
+          [["all_time", "All time"], ["this_month", "This month"]].map(([key, label]) =>
+            el("button", {
+              type: "button", class: period === key ? "active" : "", "aria-pressed": String(period === key), text: label,
+              onclick: () => { period = key; paintPoints(); },
+            })))),
+      el("ol", { class: "lb-list" },
+        ranked.map((r) => {
+          const leader = top > 0 && r[period] === top;
+          return el("li", { class: "lb-row" + (leader ? " leader" : "") },
+            el("span", { class: "lb-star", "aria-label": leader ? "Leader" : null, text: leader ? "⭐" : "" }),
+            el("span", { class: "lb-name", text: r.display_name + (r.email === state.me.email ? " (you)" : "") }),
+            el("span", { class: "lb-pts", text: `${fmtPoints(r[period])} pts` }));
+        })))));
 }
 
 // ---------- notifications ----------
@@ -163,41 +164,32 @@ let pushBusy = ""; // "on" or "off" while turning notifications on or off here
 document.addEventListener("visibilitychange", () => { if (!document.hidden) paintPush(); });
 window.addEventListener("pushchange", () => paintPush());
 
-const here = () => (isIOS() ? `this ${deviceName()}` : "this browser");
 const blockedHelp = () => isIOS()
-  ? "Blocked. To allow them: iPhone Settings → Notifications → Budget."
-  : "Blocked. Allow notifications for this site in the browser (the icon left of the address), then come back.";
+  ? "Blocked. To allow them: iPhone Settings → Notifications → Budget"
+  : "Blocked. Allow notifications for this site in the browser (the icon left of the address), then come back";
 
-// This device's switch, then the test. On iPhone, only the Home Screen app can get notifications.
+// This device's switch; with it on, your notification settings and a test button; on an iPhone,
+// Apple Pay quick-add too.
 async function paintPush() {
   if (!document.getElementById("push-box")) return;
   const can = support();
   const now = can === "ready" && !pushBusy ? await deviceState() : null;
-  let line;
+  let hint = "Notifications come to this device";
   let toggle = null;
-  if (can === "home-screen") line = "On iPhone, notifications come to the Home Screen app. Open Budget from your Home Screen and turn them on there.";
-  else if (can === "unsupported") line = isIOS() ? "Notifications need iOS 16.4 or later." : "This browser can't show notifications.";
+  let on = false;
+  if (can === "home-screen") hint = "On iPhone, notifications come to the Home Screen app. Open Budget from your Home Screen and turn them on there";
+  else if (can === "unsupported") hint = isIOS() ? "Notifications need iOS 16.4 or later" : "This browser can't show notifications";
   else {
-    const on = pushBusy ? pushBusy === "on" : now === "on";
-    line = pushBusy === "on" ? "Turning on…" : pushBusy === "off" ? "Turning off…"
-      : now === "on" ? `On. Notifications come to ${here()}.`
-      : now === "blocked" ? blockedHelp()
-      : `Off. Turn on to get notifications on ${here()}.`;
-    toggle = switchEl(on, `Notifications on ${here()}`, () => flipPush(on), Boolean(pushBusy) || now === "blocked");
+    on = pushBusy ? pushBusy === "on" : now === "on";
+    if (pushBusy) hint = pushBusy === "on" ? "Turning on…" : "Turning off…";
+    else if (now === "blocked") hint = blockedHelp();
+    toggle = switchEl(on, "Notifications on this device", () => flipPush(on), Boolean(pushBusy) || now === "blocked");
   }
   document.getElementById("push-box")?.replaceChildren(
-    pushRow(here().replace(/^t/, "T"), el("span", { class: "muted small", text: line }), toggle),
-    ...prefRows(),
-    testButton());
+    row("On this device", hint, toggle),
+    ...(on ? [disclosure("notif-settings", rowText("Notification settings"), ...prefRows()), buttonRow(testButton())] : []),
+    ...(isIOS() ? quickRows() : []));
 }
-
-const pushRow = (title, line, control) =>
-  el("div", { class: "push-row" },
-    el("div", { class: "push-text" }, el("span", { class: "push-title", text: title }), line),
-    control);
-
-const switchEl = (on, label, onclick, disabled = false) =>
-  el("button", { type: "button", class: "switch", role: "switch", "aria-checked": String(on), "aria-label": label, disabled, onclick });
 
 // ---------- your settings, for all your devices (reminders-migration.sql) ----------
 
@@ -243,7 +235,7 @@ async function setPref(patch) {
 const hourLabel = (h) => `${h % 12 || 12}:00 ${h < 12 ? "AM" : "PM"}`;
 
 function prefRows() {
-  const note = (text, ...more) => [el("p", { class: "muted small push-note" }, text, ...more)];
+  const note = (...more) => [el("p", { class: "muted small pf-pad" }, ...more)];
   if (prefs.status === "loading") return note("Loading your notification settings…");
   if (prefs.status === "missing") return note("Reminders aren't set up yet. Run reminders-migration.sql in Supabase.");
   if (prefs.status === "error") {
@@ -254,23 +246,15 @@ function prefRows() {
     class: "hour-select", "aria-label": "Reminder time", value: String(prefs.reminder_hour),
     onchange: (e) => setPref({ reminder_hour: Number(e.target.value) }),
   }, Array.from({ length: 24 }, (_, h) => el("option", { value: String(h), text: hourLabel(h) })));
-  // Show amounts first: it applies to every notification (reminders and partner activity).
   return [
-    pushRow("Show amounts",
-      el("span", { class: "muted small", text: prefs.show_amounts ? "In notifications: 🏠 Rent · EGP 12,000." : "Off. Notifications show names only." }),
-      switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
-    pushRow("Reminders",
-      prefs.reminders
-        ? el("span", { class: "muted small" }, "What's due today or overdue, every day at ", hour, ", and a nudge after a week with no entries.")
-        : el("span", { class: "muted small", text: "Off. No reminders are sent." }),
-      switchEl(prefs.reminders, "Reminders", () => setPref({ reminders: !prefs.reminders }))),
-    pushRow("Partner activity",
-      el("span", {
-        class: "muted small",
-        text: prefs.partner_activity ? "When partner(s) add or change an entry, a scheduled payment or a budget." : "Off. Nothing is sent when partner(s) add or change things.",
-      }),
+    row("Send budget reminders",
+      prefs.reminders ? ["Every day at ", hour] : `Every day at ${hourLabel(prefs.reminder_hour)}`,
+      switchEl(prefs.reminders, "Send budget reminders", () => setPref({ reminders: !prefs.reminders }))),
+    row("Partner activity", "When partner(s) add or change an entry",
       switchEl(prefs.partner_activity, "Partner activity", () => setPref({ partner_activity: !prefs.partner_activity }))),
-    ...quickRows(),
+    // Applies to every notification (reminders and partner activity).
+    row("Show amounts", "In notifications: 🏠 Rent · EGP 12,000",
+      switchEl(prefs.show_amounts, "Show amounts", () => setPref({ show_amounts: !prefs.show_amounts }))),
   ];
 }
 
@@ -279,7 +263,7 @@ function prefRows() {
 // Add form filled in. It goes through a Shortcuts automation set up once by hand (Apple lets no
 // app set one up itself): turning this on makes your own link for it and shows the steps, until
 // your first payment has come through. Off: the steps go, and the link stops working (on again
-// makes a new one).
+// makes a new one). The row is only drawn on iPhones.
 
 let quick = { status: "loading" }; // loading | ready | missing | error; ready: row (null = off), busy
 
@@ -310,55 +294,48 @@ async function flipQuick() {
   paintPush();
 }
 
-// "today, 2:14 PM" / "3 Oct, 9:05 AM"
-const atTime = (iso) => {
-  const d = new Date(iso);
-  return `${friendlyDate(isoLocal(d)).replace(/^(Today|Yesterday)$/, (w) => w.toLowerCase())}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
-};
-
 // Shown once apple_pay-quick-add-migration.sql has run (and its state could be read).
 function quickRows() {
   if (quick.status !== "ready") return [];
-  const row = quick.row;
-  const line = !row ? "Off. On iPhone, get a “tap to save it” notification after each Apple Pay payment. Needs a one-time setup."
-    : row.first_payment_at ? `On. Last Apple Pay payment: ${atTime(row.last_payment_at)}.`
-    : "On. Finish the one-time setup below; it takes about 2 minutes.";
-  const toggle = pushRow("Apple Pay quick-add", el("span", { class: "muted small", text: line }),
-    switchEl(Boolean(row), "Apple Pay quick-add", flipQuick, Boolean(quick.busy)));
-  return row && !row.first_payment_at ? [toggle, setupSteps(quickAddLink(row.key))] : [toggle];
+  const on = quick.row;
+  const toggle = row("Apple Pay quick-add", null, switchEl(Boolean(on), "Apple Pay quick-add", flipQuick, Boolean(quick.busy)));
+  return on && !on.first_payment_at ? [toggle, setupSteps(quickAddLink(on.key))] : [toggle];
 }
 
 async function copyLink(link) {
   try {
     await navigator.clipboard.writeText(link);
-    toast("Link copied. Paste it in step 5.");
+    toast("Link copied. Paste it in step 4.");
   } catch {
-    toast("Couldn't copy it. Press and hold the link below to copy it.");
+    toast("Couldn't copy it. Press and hold the link to copy it.");
   }
 }
 
-// The steps, in the words the Shortcuts app uses.
+// Your link, then the steps, in the words the Shortcuts app uses.
 function setupSteps(link) {
   const li = (...parts) => el("li", {}, ...parts);
   const b = (text) => el("strong", { text });
-  return el("div", { class: "quick-setup" },
-    el("p", { class: "quick-head", text: "One-time setup on your iPhone (iOS 17 or later)" }),
-    el("ol", {},
-      li("Copy your link. ", el("button", { type: "button", class: "btn secondary small", text: "Copy link", onclick: () => copyLink(link) }),
+  return el("div", { class: "pf-steps" },
+    el("div", { class: "pf-row" },
+      el("div", { class: "pf-text" },
+        el("b", { text: "Your link" }),
         el("span", { class: "quick-link", text: link }),
-        el("span", { class: "muted", text: "It's only yours: don't share it." })),
-      li("Open the ", b("Shortcuts"), " app, go to ", b("Automation"), ", tap ", b("+"), " and choose ", b("Wallet"), "."),
-      li("Leave your cards selected, choose ", b("Run Immediately"), ", then tap ", b("Next"), "."),
-      li("Tap ", b("New Blank Automation"), ", then ", b("Add Action"), ", and pick ", b("Get Contents of URL"), "."),
-      li("Tap ", b("URL"), " and paste your link."),
+        el("span", { class: "pf-hint", text: "Only yours, don't share it" })),
+      el("button", { type: "button", class: "btn secondary small", text: "Copy", onclick: () => copyLink(link) })),
+    el("p", { class: "pf-hint pf-pad", text: "One-time setup on your iPhone (iOS 17 or later)" }),
+    el("ol", {},
+      li("Open the ", b("Shortcuts"), " app, go to ", b("Automation"), ", tap ", b("+"), " and choose ", b("Wallet")),
+      li("Leave your cards selected, choose ", b("Run Immediately"), ", then tap ", b("Next")),
+      li("Tap ", b("New Blank Automation"), ", then ", b("Add Action"), ", and pick ", b("Get Contents of URL")),
+      li("Tap ", b("URL"), " and paste your link"),
       li("Tap ", b("›"), " to show more. Set ", b("Method"), " to ", b("POST"), " and ", b("Request Body"), " to ", b("JSON"),
         ", then add three ", b("Text"), " fields:",
         el("ul", {},
           li(b("amount"), ": tap its value, choose ", b("Shortcut Input"), ", then ", b("Amount")),
           li(b("merchant"), ": ", b("Shortcut Input"), ", then ", b("Merchant")),
           li(b("card"), ": ", b("Shortcut Input"), ", then ", b("Card"), " (it may say Card or Pass)"))),
-      li("Tap ", b("Done"), ".")),
-    el("p", { class: "muted small", text: "Then pay once with Apple Pay in a shop. A “tap to save it” notification arrives (notifications must be on for this iPhone, at the top of this section), and these steps go away. Running the automation by hand in Shortcuts sends no payment: you get a test notification instead." }));
+      li("Tap ", b("Done"))),
+    el("p", { class: "pf-hint pf-pad", text: "Then pay once with Apple Pay in a shop. A “tap to save it” notification arrives (notifications must be on for this iPhone), and these steps go away. Running the automation by hand in Shortcuts sends no payment: you get a test notification instead" }));
 }
 
 function flipPush(wasOn) {
@@ -391,7 +368,7 @@ function testResult({ devices: total, sent, removed, failed = [], reminder }) {
 
 // Sends to every device of yours that has notifications on, this one included.
 function testButton() {
-  const label = "Send a test to my devices";
+  const label = "Send a test notification";
   const button = el("button", {
     type: "button", class: "btn secondary full", text: label,
     onclick: async () => {
@@ -410,78 +387,6 @@ function testButton() {
   return button;
 }
 
-// ---------- account ----------
-
-function accountSection() {
-  const pw = el("input", {
-    class: "text-input", type: "password", autocomplete: "new-password", minlength: 8,
-    placeholder: "New password (8+ characters)", "aria-label": "New password",
-  });
-  const pwForm = el("form", {
-    class: "inline-form",
-    onsubmit: async (e) => {
-      e.preventDefault();
-      if (pw.value.length < 8) return toast("Use at least 8 characters.");
-      const { error } = await sb.auth.updateUser({ password: pw.value });
-      if (error) return toast(friendlyError(error));
-      pw.value = "";
-      toast("Password changed");
-    },
-  }, pw, el("button", { type: "submit", class: "btn small secondary", text: "Change" }));
-
-  // Your name as everyone sees it (you're the only one who can change it).
-  const nameLine = renaming ? renameForm() : el("p", { class: "acct" },
-    el("strong", { text: state.me.display_name }), el("span", { class: "muted", text: ` · ${state.me.email}` }),
-    "role" in state.me ? el("button", { type: "button", class: "link-btn acct-rename", text: "Rename", onclick: () => { renaming = true; paintAccount(); } }) : null);
-
-  return el("section", { class: "set-section", id: "account" },
-    el("h3", { text: "Account" }),
-    nameLine,
-    pwForm,
-    el("button", {
-      type: "button", class: "btn secondary full", text: "Sign out",
-      onclick: async (e) => {
-        e.currentTarget.disabled = true;
-        await turnOff(); // this device stops getting your notifications
-        sb.auth.signOut();
-      },
-    }));
-}
-
-let renaming = false;
-const paintAccount = () => document.getElementById("account")?.replaceWith(accountSection());
-
-function renameForm() {
-  const input = el("input", { class: "text-input", maxlength: 40, value: state.me.display_name, "aria-label": "Your name" });
-  setTimeout(() => input.focus(), 0);
-  return el("form", {
-    class: "inline-form",
-    onsubmit: async (e) => {
-      e.preventDefault();
-      const name = input.value.trim();
-      if (!name) return toast("Type a name.");
-      if (!navigator.onLine) return toast("Renaming needs a connection.");
-      try {
-        await renameMe(name);
-        await refreshPeople();
-        renaming = false;
-        toast("Name changed");
-        showProfile(); // the leaderboard and household list show it too
-      } catch (err) {
-        toast(friendlyError(err));
-      }
-    },
-  }, input,
-  el("button", { type: "submit", class: "btn small secondary", text: "Save" }),
-  el("button", { type: "button", class: "btn small secondary", text: "Cancel", onclick: () => { renaming = false; paintAccount(); } }));
-}
-
-// The household's list again (after a change), and you in it.
-async function refreshPeople() {
-  await reloadLists();
-  state.me = state.members.find((m) => m.email === state.me.email) || state.me;
-}
-
 // ---------- the household (household-migration.sql) ----------
 // Everyone sees who's in it; owners invite people, change roles, deactivate and reactivate.
 
@@ -494,13 +399,15 @@ const statusOf = (m) => (!isActive(m) ? "Deactivated" : !m.joined_at ? "Invited"
 const paintHousehold = () => document.getElementById("household")?.replaceWith(householdSection());
 
 function householdSection() {
-  const body = !("role" in state.me)
-    ? [el("p", { class: "muted small", text: "Managing the household isn't set up yet. Run household-migration.sql in Supabase." })]
-    : [
-        el("div", { class: "li-list" }, people().map(personRow)),
-        isOwner() ? inviteBlock() : el("p", { class: "muted small hh-note", text: "Owners can invite or deactivate people." }),
-      ];
-  return el("section", { class: "set-section", id: "household" }, el("h3", { text: "Household" }), ...body);
+  if (menuFor || inviting) openRow("members"); // a person's options or the invite form are open: keep the list open
+  const rows = !("role" in state.me)
+    ? [el("p", { class: "muted small pf-pad", text: "Managing the household isn't set up yet. Run household-migration.sql in Supabase." })]
+    : [disclosure("members", rowText("Members"),
+        el("div", { class: "li-list pf-pad" }, people().map(personRow)),
+        isOwner() ? inviteBlock() : null)];
+  const section = group("Household", card(...rows));
+  section.id = "household";
+  return section;
 }
 
 // Owners, members, invites still waiting, then people who were deactivated.
@@ -554,10 +461,11 @@ function personMenu(m) {
     }
     buttons.push(twoTap(`deactivate|${m.email}`, "Deactivate", "Tap again to deactivate", () => change(() => setMemberActive(m.email, false), `${name} was deactivated`)));
     note = m.joined_at
-      ? `Deactivating ends ${name}'s access at once and stops their notifications. Their entries stay, under their name.`
+      ? [`Deactivating ends ${name}'s access at once and stops their notifications.`, "Their entries stay, under their name."]
       : `${name} hasn't accepted the invite yet.`;
   }
-  return el("div", { class: "hh-menu" }, el("div", { class: "hh-actions" }, buttons), el("p", { class: "muted small", text: note }));
+  const lines = [note].flat().flatMap((line, i) => (i ? [el("br"), line] : [line])); // one line each
+  return el("div", { class: "hh-menu" }, el("div", { class: "hh-actions" }, buttons), el("p", { class: "muted small" }, lines));
 }
 
 // Saves a change, then shows the household as it is now.
@@ -582,15 +490,15 @@ async function change(job, done) {
 function inviteBlock() {
   if (!inviting) {
     return el("button", {
-      type: "button", class: "btn secondary full hh-invite-btn", text: "+ Invite someone",
+      type: "button", class: "pf-row pf-tap",
       onclick: () => { inviting = true; paintHousehold(); document.getElementById("hh-email")?.focus(); },
-    });
+    }, rowText("Invite someone"), el("span", { class: "pf-chev", "aria-hidden": "true", text: "›" }));
   }
   const email = el("input", { id: "hh-email", class: "text-input", type: "email", inputmode: "email", autocomplete: "off", placeholder: "Their email", "aria-label": "Their email" });
   const name = el("input", { class: "text-input", maxlength: 40, placeholder: "Their name, e.g. Sara", "aria-label": "Their name" });
   const send = el("button", { type: "submit", class: "btn primary small", text: "Send invite" });
   return el("form", {
-    class: "hh-invite", novalidate: true, // the app says what's missing, the same way on every phone
+    class: "hh-invite pf-pad", novalidate: true, // the app says what's missing, the same way on every phone
     onsubmit: async (e) => {
       e.preventDefault();
       const address = email.value.trim().toLowerCase();
@@ -620,4 +528,35 @@ function inviteBlock() {
   el("div", { class: "hh-actions" },
     el("button", { type: "button", class: "btn secondary small", text: "Cancel", onclick: () => { inviting = false; paintHousehold(); } }),
     send));
+}
+
+// ---------- account ----------
+
+function accountSection() {
+  const pw = el("input", {
+    class: "text-input", type: "password", autocomplete: "new-password", minlength: 8,
+    placeholder: "New password (8+ characters)", "aria-label": "New password",
+  });
+  const pwForm = el("form", {
+    class: "inline-form pf-pad",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      if (pw.value.length < 8) return toast("Use at least 8 characters.");
+      const { error } = await sb.auth.updateUser({ password: pw.value });
+      if (error) return toast(friendlyError(error));
+      pw.value = "";
+      toast("Password changed");
+    },
+  }, pw, el("button", { type: "submit", class: "btn small secondary", text: "Change" }));
+
+  return group("Account", card(
+    disclosure("password", rowText("Change password"), pwForm),
+    buttonRow(el("button", {
+      type: "button", class: "btn danger tint full", text: "Sign out",
+      onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        await turnOff(); // this device stops getting your notifications
+        sb.auth.signOut();
+      },
+    }))));
 }
