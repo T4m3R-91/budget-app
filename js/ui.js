@@ -134,6 +134,7 @@ export function friendlyError(e) {
   const msg = String(e?.message || e || "");
   if (e?.code === "23505") return "That name is already in the list.";
   if (isNetworkError(e)) return "Couldn't reach the server. Check your connection and try again.";
+  if (/issued at future/i.test(msg)) return "Your phone's clock looks out of step with the server. Turn on automatic date & time, then try again.";
   if (/jwt expired|invalid jwt|refresh token/i.test(msg)) return "Your session expired. Sign out and back in.";
   return msg || "Something went wrong. Please try again.";
 }
