@@ -8,7 +8,19 @@ import { state } from "./state.js";
 import { cached } from "./offline.js";
 
 export const configured = Boolean(SUPABASE_URL && SUPABASE_KEY);
-export const sb = configured ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// A token is sometimes refused as "JWT issued at future": the server that checks it is a second or
+// two behind the one that issued it. The token is fine moments later, so wait and ask again.
+async function fetchRetryingSkew(input, init) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(input, init);
+    if (res.status !== 401 || attempt >= 3) return res;
+    const text = await res.clone().text().catch(() => "");
+    if (!/issued at future/i.test(text)) return res;
+    await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+  }
+}
+
+export const sb = configured ? createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: fetchRetryingSkew } }) : null;
 
 function unwrap({ data, error }) {
   if (error) throw error;
