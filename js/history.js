@@ -1,6 +1,6 @@
 // Past entries, newest first, grouped by day. Tap one to edit or delete it; hold it (half a second,
 // or right-click with a mouse) to write a comment under it. Comments and replies sit in a dropdown
-// under the entry, closed until opened, and a 💬 count on the card says how many there are. The
+// under the entry, closed until opened, with a "Comments (n)" row inside the card saying how many there are. The
 // filter bar is the Dashboard's (same bar, same settings; see filters.js), plus History's own
 // All / Expenses / Income. Entries saved offline show on top, under "Waiting to sync", until they
 // reach the server.
@@ -24,7 +24,7 @@ let shown = PAGE; // how many of the matching entries are on screen
 let error = null;
 let generation = 0; // ignores a load that finishes after a newer one started
 
-const MAX_COMMENT = 150;
+const MAX_COMMENT = 280;
 let comments = new Map(); // entry id → its comments and replies, oldest first
 let commentsOn = true; // false until comments-migration.sql has run
 const openComments = new Set(); // entries whose comment dropdown is open
@@ -103,7 +103,8 @@ function focusOn(id) {
     renderList();
   }
   const row = document.querySelector(`#h-list .txn-row[data-id="${CSS.escape(id)}"]`);
-  if (row) spotlight(row);
+  // With comments the card is the whole block; a ring on the row alone would be clipped by it.
+  if (row) spotlight(row.closest(".txn-block.has-cm") || row);
 }
 
 function render() {
@@ -198,6 +199,7 @@ function plainDate(iso) {
 function row(t) {
   const block = el("div", { class: "txn-block", "data-block": t.id }, entryRow(t));
   if (commentsOn) block.append(...commentParts(t));
+  if (block.children.length > 1) block.classList.add("has-cm", t.type === "income" ? "income" : "expense"); // one card around the entry and its comments
   return block;
 }
 
@@ -213,20 +215,19 @@ const repaintBlock = (entryId) => {
 // cancels the hold.
 function holdToComment(t) {
   if (!commentsOn) return {};
+  return holdable(() => { heldEntry = t.id; startComposing(t.id, null); }, () => { heldEntry = null; },
+    { onclick: (e) => { if (heldEntry === t.id) { e.preventDefault(); heldEntry = null; } } });
+}
+
+// Pointer handlers that call onHold after a half-second press (or a right-click).
+function holdable(onHold, onDown = () => {}, extra = {}) {
   let timer = null;
   let start = null;
   const stop = () => clearTimeout(timer);
-  const hold = () => {
-    stop();
-    heldEntry = t.id;
-    navigator.vibrate?.(10);
-    composing = { entryId: t.id, parentId: null };
-    repaintBlock(t.id);
-    document.getElementById("cm-input")?.focus();
-  };
+  const hold = () => { stop(); navigator.vibrate?.(10); onHold(); };
   return {
     onpointerdown: (e) => {
-      heldEntry = null;
+      onDown();
       start = [e.clientX, e.clientY];
       stop();
       timer = setTimeout(hold, 500);
@@ -236,24 +237,34 @@ function holdToComment(t) {
     onpointerleave: stop,
     onpointercancel: stop,
     oncontextmenu: (e) => { e.preventDefault(); hold(); },
-    onclick: (e) => { if (heldEntry === t.id) { e.preventDefault(); heldEntry = null; } },
+    ...extra,
   };
+}
+
+// Open the box under an entry (parentId null) or under a comment (a reply).
+function startComposing(entryId, parentId) {
+  composing = { entryId, parentId };
+  if (parentId) openComments.add(entryId);
+  repaintBlock(entryId);
+  document.getElementById("cm-input")?.focus();
 }
 
 // The comment box (when it's open for this entry's own comment) and the dropdown of comments.
 function commentParts(t) {
   const list = comments.get(t.id) || [];
   const parts = [];
-  if (composing?.entryId === t.id && !composing.parentId) parts.push(composer(t.id, null));
+  const composingHere = composing?.entryId === t.id;
+  const open = openComments.has(t.id);
+  // The box sits under the list when it's open; otherwise (hold on a card) right under the entry.
+  if (composingHere && !(list.length && open)) parts.push(composer(t.id, null));
   if (list.length) {
-    const open = openComments.has(t.id);
-    parts.push(el("div", { class: "cm" },
+    parts.push(el("div", { class: "cm" + (open ? " open" : "") },
       el("button", {
         type: "button", class: "cm-toggle", "aria-expanded": String(open),
-        text: `Comments (${list.length}) ${open ? "▾" : "▸"}`,
         onclick: () => { if (open) openComments.delete(t.id); else openComments.add(t.id); repaintBlock(t.id); },
-      }),
-      open ? el("div", { class: "cm-list" }, list.filter((c) => !c.parent_id).map((c) => commentView(t.id, c, list))) : null));
+      }, el("span", { text: `Comments (${list.length})` }), el("span", { class: "cm-chev", "aria-hidden": "true" })),
+      open ? el("div", { class: "cm-list" }, list.filter((c) => !c.parent_id).map((c) => commentThread(t.id, c, list)),
+        composingHere && !composing.parentId ? composer(t.id, null) : null) : null));
   }
   return parts;
 }
@@ -265,27 +276,33 @@ function stamp(iso) {
   return `${day}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
-// One comment with its replies under it, one level in. Reply is on comments only; Delete is for
-// the author and for owners (two taps, since a comment's replies go with it).
-function commentView(entryId, c, list) {
-  const replies = list.filter((r) => r.parent_id === c.id);
-  const line = (x, canReply) => el("div", { class: "cm-item" + (x.parent_id ? " is-reply" : "") },
-    el("div", { class: "cm-head" },
-      el("strong", { text: x.author === state.me?.email ? "You" : memberName(x.author) }),
-      el("span", { class: "muted small", text: stamp(x.created_at) })),
-    el("div", { class: "cm-body", text: x.body }),
-    el("div", { class: "cm-actions" },
-      canReply ? el("button", { type: "button", class: "link-btn", text: "Reply", onclick: () => { composing = { entryId, parentId: x.id }; repaintBlock(entryId); document.getElementById("cm-input")?.focus(); } }) : null,
-      x.author === state.me?.email || isOwner()
-        ? el("button", {
-            type: "button", class: "link-btn danger", text: deleteArmed === x.id ? "Tap again to delete" : "Delete",
-            onclick: () => removeComment(entryId, x, list),
-          })
-        : null));
+// A comment with its replies under it, in their own boxes one level in. Replies to a reply (from an
+// earlier version) are listed with the others under the same comment.
+function commentThread(entryId, c, list) {
+  const rootOf = (x) => { let r = x; while (r.parent_id) { const p = list.find((y) => y.id === r.parent_id); if (!p) break; r = p; } return r; };
+  const replies = list.filter((r) => r.parent_id && rootOf(r).id === c.id);
   return el("div", { class: "cm-thread" },
-    line(c, true),
-    replies.map((r) => line(r, false)),
+    commentView(entryId, c, list, true, c.id),
+    replies.length ? el("div", { class: "cm-replies" }, replies.map((r) => commentView(entryId, r, list, false, c.id))) : null,
     composing?.entryId === entryId && composing.parentId === c.id ? composer(entryId, c.id) : null);
+}
+
+// One comment box. Delete sits in its header, for the author and for owners (two taps, since a
+// comment's replies go with it).
+function commentView(entryId, x, list, isTop, rootId) {
+  const who = (c) => (c.author === state.me?.email ? "You" : memberName(c.author));
+  const mine = x.author === state.me?.email || isOwner();
+  // Hold a comment to reply to it; hold a reply to reply to the comment it sits under.
+  return el("div", { class: "cm-item", ...holdable(() => startComposing(entryId, rootId)) },
+    el("div", { class: "cm-head" },
+      el("strong", { text: who(x) }),
+      el("span", { class: "muted small", text: stamp(x.created_at) }),
+      mine ? el("button", {
+        type: "button", class: "cm-del" + (deleteArmed === x.id ? " armed" : ""), "aria-label": "Delete comment",
+        text: deleteArmed === x.id ? "Tap again to delete" : "✕",
+        onclick: () => removeComment(entryId, x, list),
+      }) : null),
+    el("div", { class: "cm-body", text: x.body }));
 }
 
 async function removeComment(entryId, comment, list) {
@@ -294,7 +311,11 @@ async function removeComment(entryId, comment, list) {
   if (!navigator.onLine) { toast("Deleting a comment needs a connection."); return repaintBlock(entryId); }
   try {
     await deleteComment(comment.id);
-    const gone = new Set([comment.id, ...list.filter((r) => r.parent_id === comment.id).map((r) => r.id)]);
+    const gone = new Set([comment.id]); // its replies go with it, and replies to those
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const r of list) if (!gone.has(r.id) && gone.has(r.parent_id)) { gone.add(r.id); grew = true; }
+    }
     comments.set(entryId, list.filter((x) => !gone.has(x.id)));
     if (!countOf(entryId)) openComments.delete(entryId);
   } catch (e) {
@@ -303,14 +324,18 @@ async function removeComment(entryId, comment, list) {
   repaintBlock(entryId);
 }
 
-// The text box for a comment (parentId null) or a reply: up to 150 characters, with a counter.
+// The text box for a comment (parentId null) or a reply: up to 280 characters, with a counter.
 function composer(entryId, parentId) {
-  const input = el("input", {
-    id: "cm-input", class: "text-input", maxlength: MAX_COMMENT, autocomplete: "off",
+  const input = el("textarea", {
+    id: "cm-input", class: "text-input", maxlength: MAX_COMMENT, autocomplete: "off", rows: "1",
     placeholder: parentId ? "Write a reply…" : "Write a comment…", "aria-label": parentId ? "Reply" : "Comment",
   });
   const counter = el("span", { class: "cm-count muted small", text: `0/${MAX_COMMENT}` });
-  input.addEventListener("input", () => { counter.textContent = `${input.value.length}/${MAX_COMMENT}`; });
+  input.addEventListener("input", () => {
+    counter.textContent = `${input.value.length}/${MAX_COMMENT}`;
+    input.style.height = "auto"; // grows with the text (the CSS caps it)
+    input.style.height = `${input.scrollHeight + 2}px`;
+  });
   const post = el("button", { type: "submit", class: "btn small primary", text: "Post" });
   return el("form", {
     class: "cm-form",
@@ -350,13 +375,11 @@ function entryRow(t) {
   // are shortened instead when the line is too long.
   // (No ↻ for a payment scheduled just once.)
   const due = t.recurring_due_on ? `${bits.length ? "· " : ""}${itemRepeats(t.recurring_id) ? "↻ " : ""}Due ${plainDate(t.recurring_due_on)}` : null;
-  const count = commentsOn ? countOf(t.id) : 0;
   return el("a", { class: `txn-row ${income ? "income" : "expense"}`, href: `#edit/${t.id}`, "data-id": t.id, ...holdToComment(t) },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: kind?.icon || "•" }),
     el("span", { class: "txn-main" },
       el("span", { class: "txn-title" },
-        `${t.private_to ? "🔒 " : ""}${kind?.name || "Unknown"}`, // private: only its person and owners see it
-        count ? el("span", { class: "cm-badge", title: `${count} comment${count === 1 ? "" : "s"} and replies`, text: `💬 ${count}` }) : null),
+        `${t.private_to ? "🔒 " : ""}${kind?.name || "Unknown"}`), // private: only its person and owners see it
       el("span", { class: "txn-sub" }, el("span", { class: "txn-detail" }, ...detail), due ? el("span", { class: "txn-due", text: due }) : null)),
     el("span", { class: "txn-amt" },
       (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
