@@ -534,22 +534,38 @@ a.btn { display: inline-block; text-decoration: none; }
 .txn-row.expense .txn-amt { color: var(--expense); }
 .txn-amt .alt { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 .list-foot { text-align: center; color: var(--muted); font-size: 13.5px; padding: 16px 0; }
-/* Comments on an entry: a 💬 count on its card, a box under it (hold the card), and a dropdown of
+/* Comments on an entry: a "Comments (n)" row inside its card, a box under it (hold the card), and a dropdown of
    comments and replies, closed until opened. Held cards must not pop up the phone's link preview. */
 .txn-block { margin-bottom: 6px; }
 .txn-block > .txn-row { margin-bottom: 0; -webkit-touch-callout: none; }
-.cm-badge { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--panel2); color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.cm { margin: 2px 0 0 14px; }
-.cm-toggle { padding: 6px 4px; border: 0; background: none; color: var(--accent); font: inherit; font-size: 13px; }
-.cm-list { margin: 2px 0 6px; padding-left: 10px; border-left: 2px solid var(--line); display: grid; gap: 10px; }
+/* With comments, the entry and its comments share one card that grows as the dropdown opens. */
+.txn-block.has-cm { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }.txn-block.has-cm > .txn-row { border: 0; border-radius: 0; background: none; }
+.txn-block.has-cm.income { background: linear-gradient(var(--income-soft), var(--income-soft)), var(--panel); }
+.txn-block.has-cm.expense { background: linear-gradient(var(--expense-soft), var(--expense-soft)), var(--panel); }
+.cm { margin: -4px 0 0; padding: 0 12px; } /* tucked up close to the entry's details */
+.cm-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 0 0 10px; border: 0; background: none; color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+/* A drawn chevron: points down when closed, turns to point up when open. */
+.cm-chev { width: 7px; height: 7px; margin: 0 4px 3px 0; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform 0.2s; }
+.cm.open .cm-chev { transform: rotate(-135deg) translate(-1px, -1px); }
+.cm-list { margin: 0 0 10px; display: grid; gap: 12px; }
+/* Each comment is its own rounded box on the panel color (white in the light theme), with a
+   slightly darker strip for who and when. */
+.cm-list { gap: 8px; }
+.cm-item { display: grid; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.cm-head { display: flex; gap: 8px; align-items: center; box-sizing: border-box; height: 30px; font-size: 13px; padding: 0 10px; background: var(--panel2); } /* fixed, so the ✕ doesn't make yours taller than others' */
+.cm-body { padding: 8px 10px; font-size: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.cm-item { -webkit-touch-callout: none; }
+.cm-del { margin-left: auto; padding: 0 4px; font: inherit; font-size: 15px; line-height: 1; color: var(--muted); border: 0; background: none; cursor: pointer; }
+/* After the first tap it spells out the confirmation, in red. */
+.cm-del.armed { font-size: 12px; font-weight: 600; color: var(--critical); }
 .cm-thread { display: grid; gap: 8px; }
-.cm-item.is-reply { margin-left: 16px; padding-left: 10px; border-left: 2px solid var(--line); }
-.cm-head { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
-.cm-body { margin: 2px 0; font-size: 14px; overflow-wrap: anywhere; }
-.cm-actions { display: flex; gap: 10px; }
-.cm-actions .link-btn { padding: 2px 0; font-size: 13px; }
+.cm-replies { margin-left: 16px; display: grid; gap: 8px; }
 .link-btn.danger { color: var(--critical); }
-.cm-form { margin: 6px 0 4px 14px; display: grid; gap: 6px; }
+.cm-form { margin: 6px 12px 8px; display: grid; gap: 6px; }
+/* Starts as tall as the search box, then grows line by line (up to about six) as you type. */
+.cm-form .text-input { display: block; height: 38px; min-height: 38px; max-height: 148px; padding: 7px 10px; border-radius: 8px; font: inherit; line-height: 22px; resize: none; overflow-y: auto; }
+.cm-list .cm-form { margin: 0; } /* the list already has the side padding */
+.cm-thread > .cm-form { margin-left: 16px; } /* a reply box lines up with the replies above it */
 .cm-form-foot { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
 .cm-count { margin-right: auto; }
 /* Saved offline, not synced yet: dashed and faded, with a Remove button instead of a link. */
