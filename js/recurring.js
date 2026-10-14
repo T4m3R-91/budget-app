@@ -7,7 +7,7 @@
 // as the item logged. Anything left open stays due (overdue) until it's logged or skipped.
 
 import { state, byId } from "./state.js";
-import { el, toast, fmtMoney, friendlyError, isoLocal, parseISODate, spotlight } from "./ui.js";
+import { el, loadingNote, toast, fmtMoney, friendlyError, isoLocal, parseISODate, spotlight } from "./ui.js";
 import { getLiveRate, getRateOn } from "./fx.js";
 import {
   fetchRecurring, insertRecurring, updateRecurring, deleteRecurring, continueRecurring, skipOccurrence, unskipOccurrence,
@@ -344,7 +344,7 @@ function egpAmount({ item, due }) {
 }
 
 function cardBody(month) {
-  if (data.status === "idle") return [el("p", { class: "muted small", text: "Loading…" })];
+  if (data.status === "idle") return [loadingNote()];
   if (data.status === "missing") return [el("p", { class: "muted small", text: NOT_SET_UP })];
   if (data.status === "error") {
     return [el("p", { class: "muted small" }, `Couldn't load scheduled payments. ${data.message} `,
