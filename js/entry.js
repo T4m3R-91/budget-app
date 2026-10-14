@@ -5,7 +5,7 @@
 // On tile makes a new entry repeat; the row of favorites above the amount fills the form in a tap.
 
 import { state, byId, subcategoriesOf, isActive, isOwner } from "./state.js";
-import { maskField, MASK, el, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
+import { maskField, MASK, el, loadingNote, toast, fmtMoney, fmtRate, isoLocal, parseISODate, friendlyDate, relativeDay, friendlyError, isNetworkError, partOfDay } from "./ui.js";
 import { queueEntry, removePending, syncOutbox } from "./outbox.js";
 import { parseAmount, parseRate, round2, round4 } from "./numbers.js";
 import { getLiveRate, getRateOn } from "./fx.js";
@@ -239,7 +239,7 @@ export async function showEdit(id) {
     return;
   }
   f = null;
-  screen().replaceChildren(el("p", { class: "muted", text: "Loading…" }));
+  screen().replaceChildren(loadingNote());
   let t = null;
   try {
     t = await fetchTransaction(id);
@@ -1132,7 +1132,7 @@ async function onDelete(e) {
   const form = f;
   if (!form.confirmDelete) {
     form.confirmDelete = true;
-    btn.textContent = "Tap to confirm";
+    btn.textContent = "Tap again to delete";
     if (form.mode === "edit") btn.closest(".actions").after(eraseChoice(form, btn));
     disarmLater(form, btn);
     return;
@@ -1151,7 +1151,7 @@ async function onDelete(e) {
   }
 }
 
-// "Tap to confirm" goes back to Delete after 4 s untouched (ticking the erase choice counts).
+// "Tap again to delete" goes back to Delete after 4 s untouched (ticking the erase choice counts).
 function disarmLater(form, btn) {
   clearTimeout(form.disarmTimer);
   form.disarmTimer = setTimeout(() => { if (form.confirmDelete && btn.isConnected) disarm(form, btn); }, 4000);
@@ -1333,7 +1333,7 @@ async function saveFavorite() {
   }
 }
 
-// Delete on a favorite's form (after "Tap to confirm"): back to the Add tab, with Undo.
+// Delete on a favorite's form (after "Tap again to delete"): back to the Add tab, with Undo.
 async function deleteFav(id) {
   const fav = favorites.find((x) => x.id === id);
   await deleteFavorite(id);

@@ -248,7 +248,7 @@ function logList() {
 function logCard(line) {
   const d = describe(line);
   const del = removable(line)
-    ? el("button", { type: "button", class: "btn danger small log-del", text: log.armed === line.id ? "Tap again" : "Delete", onclick: (e) => removeLine(e, line) })
+    ? el("button", { type: "button", class: "btn danger small log-del", text: log.armed === line.id ? "Tap again to delete" : "Delete", onclick: (e) => removeLine(e, line) })
     : null;
   return el(d.href ? "a" : "div", { class: `txn-row inbox-card log-line${d.tone ? ` ${d.tone}` : ""}`, ...(d.href ? { href: d.href } : {}) },
     el("span", { class: "txn-ico", "aria-hidden": "true", text: d.icon }),

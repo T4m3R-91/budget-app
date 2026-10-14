@@ -110,6 +110,9 @@ export function spotlight(node) {
   node.addEventListener("animationend", () => node.classList.remove("spotlight"), { once: true });
 }
 
+// The one loading line for a screen or card (a `.muted` paragraph).
+export const loadingNote = (text = "Loading…") => el("p", { class: "muted", text });
+
 let toastTimer;
 export function toast(message, action) {
   const t = document.getElementById("toast");

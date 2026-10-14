@@ -179,7 +179,7 @@ function pendingRow(t) {
     el("span", { class: "txn-amt" },
       (income ? "+" : "−") + fmtMoney(t.amount, t.currency, { code: true }),
       el("button", {
-        type: "button", class: "btn danger small pending-remove", text: removeArmed === t.id ? "Tap again" : "Remove",
+        type: "button", class: "btn danger small pending-remove", text: removeArmed === t.id ? "Tap again to remove" : "Remove",
         onclick: async () => {
           if (removeArmed !== t.id) { removeArmed = t.id; return renderList(); }
           await removePending(t.id);

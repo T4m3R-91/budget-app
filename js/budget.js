@@ -5,7 +5,7 @@
 // one category amount.
 
 import { state, byId } from "./state.js";
-import { el, fmtMoney, toast, friendlyError, isoLocal, parseISODate, amountsHidden, MASK, maskField, fieldValue } from "./ui.js";
+import { el, loadingNote, fmtMoney, toast, friendlyError, isoLocal, parseISODate, amountsHidden, MASK, maskField, fieldValue } from "./ui.js";
 import { parseAmount } from "./numbers.js";
 import { fetchBudget, saveBudget, fetchExpensesBetween, firstEntryDate, notifyActivity } from "./db.js";
 import { paintRecurring, refreshRecurring, furthestDueMonth, scheduledFor, rateNow } from "./recurring.js";
@@ -180,7 +180,7 @@ function paintCard() {
 
 function cardBody(month, now, data) {
   const editLink = (text, cls) => el("a", { class: cls, href: `#budget/${month.slice(0, 7)}`, text });
-  if (!data || data.status === "loading") return [el("p", { class: "muted small", text: "Loading…" })];
+  if (!data || data.status === "loading") return [loadingNote()];
   if (data.status === "missing") return [el("p", { class: "muted small", text: NOT_SET_UP })];
   if (data.status === "error") {
     return [el("p", { class: "muted small" }, "Couldn't load the budget. ",
@@ -351,7 +351,7 @@ export async function showBudgetEditor(yearMonth) {
   }
   const month = `${yearMonth}-01`;
   const form = (editor = { month, saving: false, before: [] });
-  screen.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
+  screen.replaceChildren(loadingNote());
 
   const since = shiftMonth(month, -3);
   let existing, history;
