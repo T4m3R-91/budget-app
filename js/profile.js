@@ -27,6 +27,7 @@ export function showProfile() {
     headSection(),
     group("Activity", pointsBox()),
     group("Notifications", el("div", { id: "push-box", class: "pf-card" })),
+    el("div", { id: "quick-group", hidden: true }, group("Quick add", el("div", { id: "quick-box", class: "pf-card" }))),
     householdSection(),
     group("Display", displayCard()),
     group("Lists", listsCard()),
@@ -168,8 +169,8 @@ const blockedHelp = () => isIOS()
   ? "Blocked. To allow them: iPhone Settings → Notifications → Budget"
   : "Blocked. Allow notifications for this site in the browser (the icon left of the address), then come back";
 
-// This device's switch; with it on, your notification settings and a test button; on an iPhone,
-// Apple Pay quick-add too.
+// This device's switch; with it on, your notification settings and a test button. Also repaints
+// the Quick add section (Apple Pay on an iPhone).
 async function paintPush() {
   if (!document.getElementById("push-box")) return;
   const can = support();
@@ -187,8 +188,18 @@ async function paintPush() {
   }
   document.getElementById("push-box")?.replaceChildren(
     row("Allow on this device", hint, toggle),
-    ...(on ? [disclosure("notif-settings", rowText("Notification settings"), ...prefRows()), buttonRow(testButton())] : []),
-    ...(isIOS() ? quickRows() : []));
+    ...(on ? [disclosure("notif-settings", rowText("Notification settings"), ...prefRows()), buttonRow(testButton())] : []));
+  paintQuick();
+}
+
+// The Quick add section: only on an iPhone, and only once the server side is set up.
+function paintQuick() {
+  const box = document.getElementById("quick-box");
+  const wrap = document.getElementById("quick-group");
+  if (!box || !wrap) return;
+  const rows = isIOS() ? quickRows() : [];
+  box.replaceChildren(...rows);
+  wrap.hidden = rows.length === 0;
 }
 
 // ---------- your settings, for all your devices (reminders-migration.sql) ----------
