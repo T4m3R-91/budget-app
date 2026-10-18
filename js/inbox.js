@@ -36,7 +36,10 @@ async function load() {
     Object.assign(inbox, { status: inbox.rows.length ? "ready" : "error", message: friendlyError(e) });
   }
   paintBell();
-  if (!document.getElementById("screen-inbox")?.hidden) paintInbox();
+  if (!document.getElementById("screen-inbox")?.hidden) {
+    paintInbox();
+    if (tab === "me") readMine(); // one that arrived, or came back unread, while the list is open
+  }
 }
 
 const unread = () => inbox.rows.filter((n) => !n.read_at).length;
@@ -94,8 +97,9 @@ export async function showInbox(view = "me") {
 
 // For me, open: what's unread shows as new, and is marked read.
 function readMine() {
-  fresh = new Set(inbox.rows.filter((n) => !n.read_at).map((n) => n.id));
-  if (!fresh.size) return;
+  const unseen = inbox.rows.filter((n) => !n.read_at);
+  if (!unseen.length) return;
+  fresh = new Set([...fresh, ...unseen.map((n) => n.id)]);
   paintInbox();
   const now = new Date().toISOString();
   for (const n of inbox.rows) n.read_at ??= now;
